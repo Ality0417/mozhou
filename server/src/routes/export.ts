@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
+import { getExportBook } from '../services/exportBook'
+import { formatPlainText } from '../../../shared/src/writingProfile'
 
 // v0.24.4（A5）：jszip 最小接口（DOCX OOXML 组装用）
 interface JSZipLike {
@@ -17,24 +19,13 @@ export function createExportRouter(db: DatabaseSync): Router {
   router.get('/:novelId/export-preview', (req, res, next) => {
     try {
       const novelId = Number(req.params.novelId)
-      const novel = db.prepare('SELECT title, inspiration FROM novel WHERE id = ?').get(novelId) as
-        | { title: string; inspiration: string }
-        | undefined
-      if (!novel) {
-        res.status(404).json({ error: 'novel not found' })
-        return
-      }
-      const chapters = db
-        .prepare(
-          `SELECT title, content FROM chapter
-           WHERE novel_id = ? AND content != '' AND status IN ('written', 'reviewed', 'done')
-           ORDER BY id`
-        )
-        .all(novelId) as Array<{ title: string; content: string }>
+      const book = getExportBook(db, novelId)
+      if (!book) { res.status(404).json({ error: 'novel not found' }); return }
       res.json({
-        title: novel.title || '未命名小说',
-        inspiration: novel.inspiration,
-        chapters
+        title: book.title,
+        inspiration: book.inspiration,
+        profile: book.profile,
+        chapters: book.chapters
       })
     } catch (err) {
       next(err)
@@ -45,22 +36,10 @@ export function createExportRouter(db: DatabaseSync): Router {
     try {
       const novelId = Number(req.params.novelId)
       const format = z.enum(['txt', 'md', 'epub', 'docx']).parse(req.query.format ?? 'txt')
-      const novel = db.prepare('SELECT title, inspiration, framing_json FROM novel WHERE id = ?').get(novelId) as
-        | { title: string; inspiration: string; framing_json: string }
-        | undefined
-      if (!novel) {
-        res.status(404).json({ error: 'novel not found' })
-        return
-      }
-      const chapters = db
-        .prepare(
-          `SELECT title, content FROM chapter
-           WHERE novel_id = ? AND content != '' AND status IN ('written', 'reviewed', 'done')
-           ORDER BY id`
-        )
-        .all(novelId) as Array<{ title: string; content: string }>
-
-      const title = novel.title || '未命名小说'
+      const book = getExportBook(db, novelId)
+      if (!book) { res.status(404).json({ error: 'novel not found' }); return }
+      const { title, chapters, profile } = book
+      const novel = book
       // P20（E4）：文件名消毒补全（控制字符/结尾点空格/Windows 保留名）
       const safeName =
         title
@@ -72,15 +51,7 @@ export function createExportRouter(db: DatabaseSync): Router {
           .replace(/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i, '_$1') || '未命名小说'
 
       if (format === 'txt') {
-        const parts = [title, '']
-        for (const c of chapters) {
-          parts.push(c.title)
-          parts.push('')
-          parts.push(c.content)
-          parts.push('')
-        }
-        // P20（E3）：TXT 加 UTF-8 BOM（旧版 Windows 记事本按 GBK 误读中文乱码）
-        const buf = Buffer.concat([Buffer.from('\uFEFF', 'utf-8'), Buffer.from(parts.join('\n'), 'utf-8')])
+        const buf = Buffer.from(formatPlainText(title, book.inspiration, chapters, profile), 'utf-8')
         res.setHeader('Content-Type', 'text/plain; charset=utf-8')
         res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}.txt`)
         res.send(buf)
@@ -88,7 +59,7 @@ export function createExportRouter(db: DatabaseSync): Router {
       }
 
       if (format === 'md') {
-        const parts = [`# ${title}`, '', novel.inspiration ? `> 灵感：${novel.inspiration}` : '', '']
+        const parts = [`# ${title}`, '', novel.inspiration ? `> ${profile.language === 'en' ? 'Inspiration' : '灵感'}：${novel.inspiration}` : '', '']
         for (const c of chapters) {
           parts.push(`## ${c.title}`, '', c.content, '')
         }
@@ -99,7 +70,7 @@ export function createExportRouter(db: DatabaseSync): Router {
         return
       }
 
-      // DOCX（v0.24.4 A5：零新依赖——jszip 组装 OOXML；投稿平台事实标准）
+      // DOCX（v0.24.4 A5：零新依赖——jszip 组装 OOXML；是否接受需查目标平台）
       if (format === 'docx') {
         // D42：utilityProcess 下 CJS 包动态 import 双层 default（jszip .default 为 function——按"非 function 且有 default 即解包"通用处理）
         let jszipMod = (await import('jszip')) as unknown
@@ -120,7 +91,7 @@ export function createExportRouter(db: DatabaseSync): Router {
           return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`
         }
         const bodyParts: string[] = [para(title, true)]
-        if (novel.inspiration) bodyParts.push(para(`灵感：${novel.inspiration}`))
+        if (novel.inspiration) bodyParts.push(para(`${profile.language === 'en' ? 'Inspiration' : '灵感'}：${novel.inspiration}`))
         for (const c of chapters) {
           bodyParts.push(para(c.title || '（未命名章节）', true))
           // 正文空行分段（与 txt/md 语义一致）
@@ -174,7 +145,7 @@ export function createExportRouter(db: DatabaseSync): Router {
           author: 'AI-Novel-Studio',
           publisher: 'AI-Novel-Studio',
           description: novel.inspiration,
-          lang: 'zh-CN'
+          lang: profile.language
         },
         chapters.map((c, i) => ({
           title: xmlEscape(c.title || `第 ${i + 1} 章`),

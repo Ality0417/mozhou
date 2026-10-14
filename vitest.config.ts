@@ -14,7 +14,6 @@ export default defineConfig({
     pool: 'threads',
     isolate: true,
     maxWorkers: 4,
-    minWorkers: 1,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['node_modules/**', 'out/**', 'release/**', '.worktrees/**']
   }

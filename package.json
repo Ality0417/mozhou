@@ -1,13 +1,13 @@
 {
-  "name": "ai-novel-studio",
+  "name": "mozhou",
   "version": "1.1.3",
-  "description": "AI 小说创作工作台 - AI Novel Production Engine Desktop",
+  "description": "墨舟 · AI 小说工作台",
   "main": "out/main/index.js",
   "author": "ai-novel-studio",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/507513730/ai-novel-studio.git"
+    "url": "https://github.com/Ality0417/mozhou.git"
   },
   "private": true,
   "scripts": {
@@ -63,7 +63,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "5.2.0",
-    "electron": "43.4.1",
+    "electron": "43.5.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "eslint": "^9.30.0",
@@ -74,11 +74,11 @@
     "typescript": "5.9.3",
     "typescript-eslint": "^8.67.0",
     "vite": "7.3.6",
-    "vitest": "^3.2.0"
+    "vitest": "4.1.11"
   },
   "build": {
-    "appId": "com.ai-novel-studio.app",
-    "productName": "AI-Novel-Studio",
+    "appId": "com.mozhou.studio",
+    "productName": "墨舟",
     "directories": {
       "output": "release"
     },
@@ -116,16 +116,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI 小说创作工作台",
-      "artifactName": "AI-Novel-Studio-Setup-${version}.${ext}"
+      "shortcutName": "墨舟 · AI 小说工作台",
+      "artifactName": "Mozhou-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-portable-${arch}.${ext}"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "507513730",
-      "repo": "ai-novel-studio"
+      "artifactName": "Mozhou-${version}-portable-${arch}.${ext}"
     }
   },
   "packageManager": "pnpm@10.34.5"

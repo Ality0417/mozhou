@@ -1,3 +1,4 @@
+import { countNovelWords } from '../services/writingProfile'
 import { Router } from 'express'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
@@ -385,10 +386,6 @@ export function createVolumesRouter(db: DatabaseSync): Router {
         sets.push('goal_json = ?')
         params.push(JSON.stringify(input.goal))
       }
-      if (input.status !== undefined) {
-        sets.push('status = ?')
-        params.push(input.status)
-      }
       if (input.content !== undefined) {
         // v0.17.0（审查 M13）：空内容保护——拒绝用空串覆盖正文（避免误清空）
         if (input.content.trim() === '') {
@@ -398,7 +395,23 @@ export function createVolumesRouter(db: DatabaseSync): Router {
         sets.push('content = ?')
         params.push(input.content)
         sets.push('word_count = ?')
-        params.push((input.content.match(/[\u4e00-\u9fff]/g) ?? []).length)
+        params.push(countNovelWords(db, novelId, input.content))
+      }
+      const reviewChanges: Array<[string, string]> = []
+      if (input.content !== undefined) reviewChanges.push(['content', input.content])
+      if (input.goal !== undefined) reviewChanges.push(['goal_json', JSON.stringify(input.goal)])
+      if (input.summary !== undefined) reviewChanges.push(['summary', input.summary])
+      if (input.title !== undefined) reviewChanges.push(['title', input.title])
+      if (reviewChanges.length > 0) {
+        const condition = reviewChanges.map(([column]) => `${column} IS NOT ?`).join(' OR ')
+        sets.push(`review_json = CASE WHEN ${condition} THEN '{}' ELSE review_json END`)
+        params.push(...reviewChanges.map(([, value]) => value))
+        sets.push(`status = CASE WHEN (${condition}) AND (status IN ('reviewed','done')${input.status === 'reviewed' || input.status === 'done' ? ' OR 1=1' : ''}) THEN 'written' ELSE ${input.status === undefined ? 'status' : '?'} END`)
+        params.push(...reviewChanges.map(([, value]) => value))
+        if (input.status !== undefined) params.push(input.status)
+      } else if (input.status !== undefined) {
+        sets.push('status = ?')
+        params.push(input.status)
       }
       // v0.19.0：字数分离增量累计（仅累加，不覆盖）
       if (input.aiWordsDelta !== undefined && input.aiWordsDelta > 0) {

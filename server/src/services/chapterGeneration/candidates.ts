@@ -1,3 +1,4 @@
+import { countNovelWords } from '../writingProfile'
 // 章节多候选分支生成域（v1.0 后续 A1）：串行生成 N 份候选构想，各存为 chapter_version 快照。
 // 与 generateChapter 的区别：不抢占章节、不改 chapter.content/status——只做"生成 + 版本快照 + 返回候选列表"，
 // 用户选定后复用现有版本恢复流程（chapterVersionRestore）把该候选落为正文，其余候选留在版本历史。
@@ -90,7 +91,7 @@ export async function generateChapterCandidates(
       index: i,
       note,
       content,
-      wordCount: (content.match(/[\u4e00-\u9fff]/g) ?? []).length,
+      wordCount: countNovelWords(db, novelId, content),
       versionId
     })
   }

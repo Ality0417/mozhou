@@ -1,9 +1,10 @@
 // 章节生成后处理域（spec §3.1）：主角名替换、硬约束校验登记、反 AI 重写。
-// 只变换内存文本与登记质量债，禁止写 chapter / chapter_version（落库统一走 persistence.ts）。
+// 只变换内存文本、登记质量债并调用共享预算服务；正文/版本落库统一走 persistence.ts。
 import { DatabaseSync } from 'node:sqlite'
 import { callLlmJson } from '../jsonSafe'
 import { getBoundStyleRules, detectAntiAiHits, extractAntiAiWordsFromRules } from '../styleEngine'
 import { replaceProtagonistName, validateConstraints, recordConstraintViolation } from '../constraintEngine'
+import { claimRepairRound, finishRepairRound, recordRepairDebt, describeRepairDenial } from '../repairBudget'
 
 export interface PostProcessResult {
   content: string
@@ -43,6 +44,24 @@ export async function postProcessGeneratedContent(
   const totalHits = hits.reduce((sum, hit) => sum + hit.count, 0)
   if (totalHits < 5 && !hits.some((hit) => hit.count >= 3)) return { content, degradedReasons }
 
+  // 只发送前 8000 字符再整章替换会丢失尾部；超出安全处理长度时不调用、不占额度。
+  if (content.length > 8000) {
+    const message = '正文超过反 AI 自动重写安全长度（8000 字符），已跳过，原文完整保留。'
+    degradedReasons.push(`anti-ai rewrite skipped: ${message}`)
+    recordRepairDebt(db, chapterId, message, 'medium')
+    return { content, degradedReasons }
+  }
+  const claim = claimRepairRound(db, novelId, chapterId, {
+    source: 'anti-ai',
+    issues: hits.map(hit => ({ severity: 'medium', problem: `[反 AI 用语] ${hit.word}`, suggestion: '只替换该词/句式，保持原文结构与内容' }))
+  })
+  if (!claim.claimed) {
+    const message = describeRepairDenial(claim.reason)
+    degradedReasons.push(`anti-ai rewrite skipped: ${message}`)
+    if (claim.reason !== 'chapter not found') recordRepairDebt(db, chapterId, message)
+    return { content, degradedReasons }
+  }
+  const repairWords = claim.issues.map(issue => issue.problem.slice('[反 AI 用语] '.length))
   console.warn(
     `[anti-ai] 命中 ${totalHits} 次（${hits.slice(0, 5).map((h) => `${h.word}x${h.count}`).join(',')}），自动重写一次`
   )
@@ -55,7 +74,7 @@ export async function postProcessGeneratedContent(
         messages: [
           {
             role: 'user',
-            content: `你是文字润色编辑。以下章节含禁用的 AI 腔词汇，请只替换这些词/句式（保持原文结构与内容），不要改动其他文字。\n禁用词：${words.join('、')}\n\n【正文】\n${content.slice(0, 8000)}\n\n请只输出 JSON 对象：{"content": "重写后的全文"}`
+            content: `你是文字润色编辑。以下章节含禁用的 AI 腔词汇，请只替换这些词/句式（保持原文结构与内容），不要改动其他文字。\n禁用词：${repairWords.join('、')}\n\n【正文】\n${content}\n\n请只输出 JSON 对象：{"content": "重写后的全文"}`
           }
         ],
         maxTokens: 8192
@@ -69,11 +88,14 @@ export async function postProcessGeneratedContent(
     )
     if (rewritten.content.length >= content.length * 0.5) {
       content = rewritten.content
+      finishRepairRound(db, claim, 'completed')
     } else {
+      finishRepairRound(db, claim, 'rejected')
       degradedReasons.push('anti-ai rewrite rejected: output too short')
       console.warn('[anti-ai] 重写过短（<原文 50%），保留原文')
     }
   } catch (error) {
+    finishRepairRound(db, claim, 'failed')
     degradedReasons.push(`anti-ai rewrite failed: ${error instanceof Error ? error.message : String(error)}`)
     console.warn('[anti-ai] 重写失败，保留原文:', error instanceof Error ? error.message : String(error))
   }

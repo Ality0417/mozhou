@@ -1,3 +1,4 @@
+import { countNovelWords } from '../writingProfile'
 // 章节生成编排域（spec §3.1）：只协调上下文、LLM、截断检测、后处理与持久化，
 // 不直接写 chapter / chapter_version（状态走 state.ts，落库走 persistence.ts）。
 import { DatabaseSync } from 'node:sqlite'
@@ -121,7 +122,7 @@ export async function generateChapter(
     let cacheHit = llmResult.usage.cacheHit
     let cacheMiss = llmResult.usage.cacheMiss
 
-    const wordCount = (content.match(/[\u4e00-\u9fff]/g) ?? []).length
+    const wordCount = countNovelWords(db, novelId, content)
     if (!content) console.warn(`[generate] 章节 ${chapterId} 产出为空 → 置 failed（可重试）`)
     // v0.15.0：确定性校验——字数区间告警（按后处理后的最终内容判定）
     if (!aborted && wordCount > 0 && (wordCount < 1500 || wordCount > 4500)) {

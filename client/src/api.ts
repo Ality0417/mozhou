@@ -2,7 +2,10 @@ import type {
   BeatData,
   ChapterSummary,
   CharacterData,
+  FactReviewInput,
   NovelDetail,
+  NovelMemory,
+  NovelPending,
   NovelStats,
   NovelSummary,
   SearchResults,
@@ -243,14 +246,12 @@ export const novelApi = {
     js(`/novels/${id}/chapters/${chapterId}/proofread`, { method: 'POST', body: JSON.stringify(content !== undefined ? { content } : {}) }),
   confirmState: (id: number, characterStates: Array<{ name: string; state: string }>): Promise<{ ok: boolean }> =>
     j(`/novels/${id}/confirm-state`, { method: 'POST', body: JSON.stringify({ characterStates }) }),
-  pending: (id: number): Promise<{ pendingFacts: Array<{ id: number; content: string; chapterId: number }>; pendingCharacters: Array<{ id: number; name: string; profile: Record<string, string> }> }> =>
+  pending: (id: number): Promise<NovelPending> =>
     j(`/novels/${id}/pending`),
+  reviewFact: (id: number, factId: number, input: FactReviewInput): Promise<{ ok: boolean; changed: boolean }> =>
+    j(`/novels/${id}/facts/${factId}/review`, { method: 'POST', body: JSON.stringify(input) }),
   // v0.20.0：记忆面（状态机显式查看/修正）
-  memory: (id: number): Promise<{
-    characters: Array<{ name: string; states: string[] }>
-    factions: Array<{ name: string; currentState: string }>
-    pendingFacts: Array<{ id: number; content: string }>
-  }> => j(`/novels/${id}/memory`),
+  memory: (id: number): Promise<NovelMemory> => j(`/novels/${id}/memory`),
   memoryCharacter: (id: number, body: { name: string; state?: string; remove?: boolean }): Promise<{ ok: boolean; states: string[] }> =>
     js(`/novels/${id}/memory/character`, { method: 'POST', body: JSON.stringify(body) }),
   memoryFaction: (id: number, body: { name: string; state: string }): Promise<{ ok: boolean }> =>

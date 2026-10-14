@@ -7,6 +7,8 @@ import { detectAntiAiHits, getBoundStyleRules, extractAntiAiWordsFromRules } fro
 // v0.21.0（审查 M8 残）：统一 import JSON_FORMAT（此前本地副本与 prompts/index.ts 重复）
 import { JSON_FORMAT } from '../prompts'
 import { isFixWarranted } from '../services/reviewPolicy'
+import { ChapterSaveConflict } from '../services/chapterSave'
+import { recordRepairDebt } from '../services/repairBudget'
 
 // ============================================================
 // P5 多智能体：Agent 管理 + 团队协作端点
@@ -415,21 +417,22 @@ export function createAgentsRouter(db: DatabaseSync): Router {
           degradedFoci
         }
       }
-      db.prepare(
-        "UPDATE chapter SET review_json = ?, status = 'reviewed', updated_at = datetime('now') WHERE id = ?"
-      ).run(JSON.stringify(persistedReview), input.chapterId)
-      // 质量债（INSERT OR IGNORE 防重复）
-      const insertDebt = db.prepare(
-        `INSERT OR IGNORE INTO quality_debt (chapter_id, issue, severity)
-         SELECT ?, ?, ? WHERE NOT EXISTS (
-           SELECT 1 FROM quality_debt WHERE chapter_id = ? AND issue = ? AND resolved = 0
-         )`
-      )
-      for (const issue of persistedReview.issues) {
-        if (issue.severity === 'high' || issue.severity === 'medium') {
-          const sig = `${issue.location} ${issue.problem}`
-          insertDebt.run(input.chapterId, sig, issue.severity, input.chapterId, sig)
+      // 团队审核和单人审核使用同一归属守卫，不能把等待期间失效的结果挂到新稿。
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const committed = db.prepare(
+          "UPDATE chapter SET review_json=?, status='reviewed', updated_at=datetime('now') WHERE id=? AND novel_id=? AND content=? AND goal_json=? AND status!='generating'"
+        ).run(JSON.stringify(persistedReview), input.chapterId, novelId, chapter.content, chapter.goal_json)
+        if (!committed.changes) throw new ChapterSaveConflict('CHAPTER_CONTENT_CONFLICT')
+        for (const issue of persistedReview.issues) {
+          if (issue.severity === 'high' || issue.severity === 'medium') {
+            recordRepairDebt(db, input.chapterId, `${issue.location} ${issue.problem}`, issue.severity)
+          }
         }
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
       }
 
       res.json({

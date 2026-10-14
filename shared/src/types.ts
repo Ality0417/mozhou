@@ -215,13 +215,31 @@ export interface ExportPreviewChapter {
 export interface ExportPreview {
   title: string
   inspiration: string
+  profile?: import('./writingProfile').WritingProfile
   chapters: ExportPreviewChapter[]
+}
+
+export interface PendingFact {
+  id: number
+  content: string
+  chapterId?: number | null
+  chapterTitle?: string | null
+}
+
+export interface FactReviewInput {
+  action: 'confirm' | 'reject'
+  expectedContent: string
+}
+
+export interface NovelPending {
+  pendingFacts: PendingFact[]
+  pendingCharacters: Array<{ id: number; name: string; profile: Record<string, string> }>
 }
 
 export interface NovelMemory {
   characters: Array<{ name: string; states: string[] }>
   factions: Array<{ name: string; currentState: string }>
-  pendingFacts: Array<{ id: number; content: string }>
+  pendingFacts: PendingFact[]
 }
 
 // v0.20.0：运行轨迹（任务进度时间线条目）

@@ -70,6 +70,7 @@ function Page({ name, children }: { name: string; children: React.ReactNode }): 
 }
 
 export function App(): React.JSX.Element {
+  const [localMode, setLocalMode] = useState(() => sessionStorage.getItem('mozhou-local-mode') === '1')
   const [baseUrl, setBaseUrl] = useState<string | null>(null)
   // v0.17.0（审查 C25）：命令面板状态提升到组件顶层——此前在 useEffect 源序之后声明（先使用后声明）
   const [commandOpen, setCommandOpen] = useState(false)
@@ -184,12 +185,13 @@ export function App(): React.JSX.Element {
   }
 
   const info = bootstrap.data
-  if (info?.firstRun || !info?.hasApiKey) {
-    return <Onboarding onDone={() => void bootstrap.refetch()} />
+  if ((info?.firstRun || !info?.hasApiKey) && !localMode) {
+    return <Onboarding onDone={() => void bootstrap.refetch()} onLocalMode={() => { sessionStorage.setItem('mozhou-local-mode', '1'); setLocalMode(true) }} />
   }
 
   return (
     <HashRouter>
+      {!info?.hasApiKey && <div role="status" style={{ padding: '6px 16px', background: 'var(--accent-soft)', color: 'var(--text)', fontSize: 12 }}>本地体验：未连接模型，AI 生成暂不可用。手动编辑、项目设置和导出可正常使用。</div>}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
       <Routes>
         <Route element={<AppLayout />}>

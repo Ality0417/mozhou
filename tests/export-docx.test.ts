@@ -94,7 +94,7 @@ describe('DOCX 导出（A5）', () => {
         chapters: Array<{ title: string; content: string }>
       }
       expect(body.title).toBe('预览测试')
-      expect(body.inspiration).toBe('一句灵感')
+      expect(body.inspiration).toBe('')
       expect(body.chapters).toHaveLength(1)
       expect(body.chapters[0]).toEqual({ title: '第一章', content: '已写正文' })
     })

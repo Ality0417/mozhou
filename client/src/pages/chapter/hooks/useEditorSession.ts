@@ -6,16 +6,17 @@
 // 共享 ref（contentLoadingRef/streamingRef/loadedChapterRef/savedContentRef/dirtyRef）由页面创建传入——
 // 它们是加载器/生成器/会话三方的协调管道。
 import { useMemo, useRef, useState } from 'react'
-import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
+import { ExternalChange, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Annotation, type AnnotationType } from '@codemirror/state'
 import { useChapterSave } from './useChapterSave'
-import { countCjk } from '../types'
+import { countWritingUnits, type WritingLanguage } from '../../../../../shared/src/writingProfile'
 
 // v0.19.0：AI 写入标记（字数分离：区分 AI 插入与人工输入）
 export const aiWrite = Annotation.define<boolean>()
 
 export interface EditorSessionDeps {
   novelId: number
+  writingLanguage?: WritingLanguage
   selectedChapter: number | null
   editorRef: React.MutableRefObject<ReactCodeMirrorRef | null>
   // 协调管道（页面创建，loader/generation 共享）
@@ -54,7 +55,9 @@ export function useEditorSession(deps: EditorSessionDeps): {
   trackHumanWords: (update: {
     docChanged: boolean
     transactions: Array<{ annotation: (a: AnnotationType<boolean>) => boolean | undefined }>
-    changes: { inserted?: string }
+    changes: { inserted?: unknown; iterChanges?: (fn: (fromA: number, toA: number, fromB: number, toB: number, inserted: { toString: () => string }) => void) => void }
+    startState?: { doc: { toString: () => string } }
+    state?: { doc: { toString: () => string } }
   }) => void
   saveContent: (opts?: { silent?: boolean; force?: boolean }) => Promise<void>
   readContent: () => string
@@ -78,7 +81,8 @@ export function useEditorSession(deps: EditorSessionDeps): {
   const humanDeltaRef = useRef(0)
   const [wordStats, setWordStats] = useState<{ ai: number; human: number }>({ ai: 0, human: 0 })
   // P20（U5）：字数统计 memo（避免每次击键重渲染时 O(n) 扫描）
-  const hanCount = useMemo(() => (content.match(/[\u4e00-\u9fff]/g) ?? []).length, [content])
+  const language = deps.writingLanguage ?? 'zh-CN'
+  const hanCount = useMemo(() => countWritingUnits(content, language), [content, language])
 
   const updateSelectionInfo = (): void => {
     const view = editorRef.current?.view
@@ -97,7 +101,7 @@ export function useEditorSession(deps: EditorSessionDeps): {
     if (pos !== undefined) {
       view.dispatch({ selection: { anchor: pos } })
     }
-    const cjk = countCjk(inserted)
+    const cjk = countWritingUnits(inserted, language)
     if (cjk > 0) {
       aiDeltaRef.current += cjk
       setWordStats((s) => ({ ...s, ai: s.ai + cjk }))
@@ -150,13 +154,19 @@ export function useEditorSession(deps: EditorSessionDeps): {
   const trackHumanWords = (update: {
     docChanged: boolean
     transactions: Array<{ annotation: (a: AnnotationType<boolean>) => boolean | undefined }>
-    changes: { inserted?: string }
+    changes: { inserted?: unknown; iterChanges?: (fn: (fromA: number, toA: number, fromB: number, toB: number, inserted: { toString: () => string }) => void) => void }
+    startState?: { doc: { toString: () => string } }
+    state?: { doc: { toString: () => string } }
   }): void => {
     if (!update.docChanged || streamingRef.current) return
-    const isAi = update.transactions.some((t) => t.annotation(aiWrite))
+    const isAi = update.transactions.some((t) => t.annotation(aiWrite) || t.annotation(ExternalChange))
     if (isAi) return
-    const inserted = update.changes.inserted ?? ''
-    const cjk = countCjk(inserted)
+    let inserted = ''
+    if (update.changes.iterChanges) update.changes.iterChanges((_fromA, _toA, _fromB, _toB, text) => { inserted += text.toString() })
+    else if (typeof update.changes.inserted === 'string') inserted = update.changes.inserted
+    const cjk = language === 'en' && update.startState && update.state
+      ? Math.max(0, countWritingUnits(update.state.doc.toString(), language) - countWritingUnits(update.startState.doc.toString(), language))
+      : countWritingUnits(inserted, language)
     if (cjk > 0) {
       humanDeltaRef.current += cjk
       setWordStats((s) => ({ ...s, human: s.human + cjk }))

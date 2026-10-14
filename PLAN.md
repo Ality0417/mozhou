@@ -1,3 +1,5 @@
+> 墨舟分支说明：以下为上游历史文档。当前工作范围及验证状态以 README.md 和 docs/MOZHOU-VERIFICATION.md 为准；上游提及的授权、密钥位置及个人数据不是本项目授权。
+
 # AI-Novel-Studio 当前计划（精简版）
 
 > **2026-08-22 文档治理**：完整实施编年史（v3.1 审查修订版 + P0-P30+ 各阶段清单 + §12 历史版本记录）已归档至 [docs/archive/PLAN-history.md](docs/archive/PLAN-history.md)。

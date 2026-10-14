@@ -15,7 +15,7 @@ export function ChapterExecutionPage(): React.JSX.Element {
 }
 
 function ChapterWorkspace(): React.JSX.Element {
-  const { ai, requestAi, assistantTab, setAssistantTab, mobilePanel, setMobilePanel, chapterPromptElement, confirmDialog, fileOps, focusMode, setFocusMode, id, list, chaptersLoading, chaptersError, selectedChapter, selectChapter, artifacts, askChapterTitle, feedback, actions, invalidate, navigate, chapter, hanCount, statsShow, saving, streaming, contentLoading, guidanceDraft, setGuidanceDraft, saveContent, generate, viewMode, setViewMode, selectionInfo, content, chapterIdx, dirtyRef, setContent, updateSelectionInfo, trackHumanWords, quickWords, suggestion, editorRef, streamStat, fixDoneRef, backfillDoneRef, snapshotDoneRef, savedContentRef, cancelGenerate, confirmFn, candidates, buildInclude, session } = useChapterWorkspace()
+  const { writingLanguage, ai, requestAi, assistantTab, setAssistantTab, mobilePanel, setMobilePanel, chapterPromptElement, confirmDialog, fileOps, focusMode, setFocusMode, id, list, chaptersLoading, chaptersError, selectedChapter, selectChapter, artifacts, askChapterTitle, feedback, actions, invalidate, navigate, chapter, hanCount, statsShow, saving, streaming, contentLoading, guidanceDraft, setGuidanceDraft, saveContent, generate, viewMode, setViewMode, selectionInfo, content, chapterIdx, dirtyRef, setContent, updateSelectionInfo, trackHumanWords, quickWords, suggestion, editorRef, streamStat, fixDoneRef, backfillDoneRef, snapshotDoneRef, savedContentRef, cancelGenerate, confirmFn, candidates, buildInclude, session } = useChapterWorkspace()
 
   return (
     <>
@@ -68,6 +68,7 @@ function ChapterWorkspace(): React.JSX.Element {
             key={selectedChapter}
             title={chapter?.title ?? '选择章节'}
             hanCount={hanCount}
+            wordUnit={writingLanguage === 'en' ? '词' : '字'}
             saving={saving}
             dirty={dirtyRef.current || content !== savedContentRef.current}
             saveError={session.saveError}
@@ -136,7 +137,7 @@ function ChapterWorkspace(): React.JSX.Element {
             />
           )}
           <div className="statusbar">
-            <span>{hanCount.toLocaleString()} 字 · 我的 {statsShow.human.toLocaleString()} · AI {statsShow.ai.toLocaleString()}</span>
+            <span>{hanCount.toLocaleString()} {writingLanguage === 'en' ? '词' : '字'} · 我的 {statsShow.human.toLocaleString()} · AI {statsShow.ai.toLocaleString()}</span>
             {ai.running && <span role="status">正在处理：{ai.running.title}</span>}
             {streamStat && <span style={{ color: 'var(--accent-bright)' }}>{streamStat}</span>}
             {feedback.actionMsg && <span style={{ color: 'var(--ok)', marginLeft: 8 }}>{feedback.actionMsg}</span>}

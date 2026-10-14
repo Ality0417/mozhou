@@ -18,6 +18,9 @@ import { getAutoFixEnabled } from '../appSettings'
 import { isFixWarranted } from '../reviewPolicy'
 import { selectPendingChapters, isGenerationSubstandard, isBatchFatalError } from './chapterPolicy'
 import { createProgress, type ProductionProgress } from './progress'
+import { claimRepairRound, finishRepairRound, deduplicateRepairIssues, recordRepairDebt, describeRepairDenial, type RepairClaim } from '../repairBudget'
+import { countNovelWords } from '../writingProfile'
+import { writePendingFacts } from '../facts'
 
 export interface ProductionPipelineOptions {
   from?: number
@@ -156,99 +159,117 @@ async function reviewFixBackfill(
     },
     (obj) => {
       const r = obj as Record<string, unknown>
-      if (typeof r.score !== 'number') return null
+      if (typeof r.score !== 'number' || !Number.isFinite(r.score)) return null
       return {
         score: r.score,
-        issues: Array.isArray(r.issues)
-          ? r.issues.map((i) => {
-              const x = i as Record<string, unknown>
-              return {
-                severity: String(x.severity ?? 'medium'),
-                problem: String(x.problem ?? ''),
-                suggestion: String(x.suggestion ?? '')
-              }
-            })
-          : [],
-        needsFix: Boolean(r.needsFix)
+        issues: deduplicateRepairIssues(r.issues),
+        needsFix: isFixWarranted(r.score, deduplicateRepairIssues(r.issues))
       }
     },
     'production-review'
   )
 
+  // 审核也必须归属原稿；持久化后债务修复才能消费生产问题，而不是空审核。
+  if (!db.prepare("UPDATE chapter SET review_json=? WHERE id=? AND novel_id=? AND content=? AND status='written'")
+    .run(JSON.stringify(review), chapterId, novelId, generatedContent).changes) return { score: 0, conflicted: true }
+
   // 3. 低分修复（P2.1 修复 #4：真 patch_first 局部补丁，失败降级整章重写）
   // v0.24.4（D107）：触发条件改 isFixWarranted——60-74 仅 medium/low 不再自动修（登记质量债），省 2-3 次 LLM/章
   let finalContent = generatedContent
   let score = review.score
+  let finalReview = review
+  let repairClaim: Extract<RepairClaim, { claimed: true }> | undefined
   if (isFixWarranted(review.score, review.issues)) {
-    progress.currentAction = `修复（评分 ${review.score}）`
-    onProgress(progress)
-    try {
-      // 3a. 先尝试局部补丁（patch_first）
-      const patchMessages = buildPatchContext(db, novelId, chapterId, generatedContent, review.issues)
-      const patchResult = await callLlmJson<{ patches: Array<{ target: string; replacement: string }> }>(
-        db,
-        'extraction',
-        {
-          novelId,
-          messages: patchMessages,
-          maxTokens: 4096
-        },
-        (obj) => {
-          const arr = (obj as { patches?: unknown }).patches
-          if (!Array.isArray(arr) || arr.length === 0) return null
-          return {
-            patches: arr
-              .map((p) => {
-                const r = p as Record<string, unknown>
-                return { target: String(r.target ?? ''), replacement: String(r.replacement ?? '') }
-              })
-              .filter((p) => p.target && p.replacement)
-          }
-        },
-        'production-patch'
-      )
-      const patched = applyPatches(generatedContent, patchResult.patches)
-      if (patched !== null) {
-        finalContent = patched
-      } else {
-        // 3b. 局部补丁失败（target 未匹配）→ 降级整章重写
-        const fixMessages = buildFixContext(db, novelId, chapterId, generatedContent, review.issues)
-        const fixed = await callLlmJson<{ content: string }>(
+    const claim = claimRepairRound(db, novelId, chapterId, { source: 'production', issues: review.issues, expectedContent: generatedContent })
+    if (!claim.claimed) {
+      progress.currentAction = describeRepairDenial(claim.reason)
+      recordRepairDebt(db, chapterId, progress.currentAction)
+      progress.qualityDebts += 1
+      onProgress(progress)
+    } else {
+      repairClaim = claim
+      progress.currentAction = `修复（第 ${claim.round} 轮，评分 ${review.score}）`
+      onProgress(progress)
+      try {
+        // 3a. 先尝试局部补丁（patch_first）
+        const patchMessages = buildPatchContext(db, novelId, chapterId, generatedContent, claim.issues)
+        const patchResult = await callLlmJson<{ patches: Array<{ target: string; replacement: string }> }>(
           db,
           'extraction',
           {
             novelId,
-            messages: fixMessages,
-            maxTokens: 8192
+            messages: patchMessages,
+            maxTokens: 4096
+          },
+          (obj) => {
+            const arr = (obj as { patches?: unknown }).patches
+            if (!Array.isArray(arr) || arr.length === 0) return null
+            const patches = arr
+              .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === 'object')
+              .map((p) => ({ target: String(p.target ?? ''), replacement: String(p.replacement ?? '') }))
+              .filter((p) => p.target && p.replacement)
+            return patches.length > 0 ? { patches } : null
+          },
+          'production-patch'
+        )
+        const patched = applyPatches(generatedContent, patchResult.patches)
+        if (patched !== null) {
+          finalContent = patched
+        } else {
+          // 3b. 局部补丁失败（target 未匹配）→ 降级整章重写
+          const fixMessages = buildFixContext(db, novelId, chapterId, generatedContent, claim.issues)
+          const fixed = await callLlmJson<{ content: string }>(
+            db,
+            'extraction',
+            {
+              novelId,
+              messages: fixMessages,
+              maxTokens: 8192
+            },
+            (obj) => {
+              const r = obj as Record<string, unknown>
+              return typeof r.content === 'string' && r.content.length > 100 ? { content: r.content } : null
+            },
+            'production-fix'
+          )
+          finalContent = fixed.content
+        }
+        const current = db.prepare('SELECT content, status FROM chapter WHERE id=? AND novel_id=?').get(chapterId, novelId) as { content: string; status: string } | undefined
+        if (!current || current.content !== generatedContent || current.status !== 'written') {
+          if (current && finalContent !== generatedContent) persistCandidateVersion(db, chapterId, finalContent, 'AI 待采用：生产修复期间正文已修改')
+          finishRepairRound(db, claim, 'conflicted')
+          return { score: 0, conflicted: true }
+        }
+        // 修复后重审（重审闭环）
+        const rescoreMessages = buildChapterReviewContext(db, novelId, chapterId, finalContent)
+        const rescore = await callLlmJson<typeof review>(
+          db,
+          'extraction',
+          {
+            novelId,
+            messages: rescoreMessages,
+            maxTokens: 2048
           },
           (obj) => {
             const r = obj as Record<string, unknown>
-            return typeof r.content === 'string' && r.content.length > 100 ? { content: r.content } : null
+            if (typeof r.score !== 'number' || !Number.isFinite(r.score)) return null
+            const issues = deduplicateRepairIssues(r.issues)
+            return { score: r.score, issues, needsFix: isFixWarranted(r.score, issues) }
           },
-          'production-fix'
+          'production-rescore'
         )
-        finalContent = fixed.content
+        score = rescore.score
+        finalReview = { score, issues: deduplicateRepairIssues(rescore.issues), needsFix: isFixWarranted(score, deduplicateRepairIssues(rescore.issues)) }
+      } catch (error) {
+        // 修复失败：保留原正文，记质量债务
+        finishRepairRound(db, claim, 'failed')
+        repairClaim = undefined
+        finalContent = generatedContent
+        finalReview = review
+        recordRepairDebt(db, chapterId, '生产修复或重审未完成，本轮额度已消耗；保留原文，请人工检查。')
+        progress.qualityDebts += 1
+        if (error instanceof ConfigError) throw error
       }
-      // 修复后重审（重审闭环）
-      const rescoreMessages = buildChapterReviewContext(db, novelId, chapterId, finalContent)
-      const rescore = await callLlmJson<{ score: number }>(
-        db,
-        'extraction',
-        {
-          novelId,
-          messages: rescoreMessages,
-          maxTokens: 2048
-        },
-        (obj) => {
-          const r = obj as Record<string, unknown>
-          return typeof r.score === 'number' ? { score: r.score } : null
-        },
-        'production-rescore'
-      )
-      score = rescore.score
-    } catch {
-      // 修复失败：保留原正文，记质量债务
-      progress.qualityDebts += 1
     }
   }
 
@@ -256,18 +277,26 @@ async function reviewFixBackfill(
   // R0-F6：守卫推进 reviewed——仅从生成域落库的 written 状态推进
   let committed: number | bigint
   if (finalContent !== generatedContent) {
-    const fc = (finalContent.match(/[\u4e00-\u9fff]/g) ?? []).length
+    const fc = countNovelWords(db, novelId, finalContent)
     committed = db.prepare(
-      "UPDATE chapter SET content = ?, word_count = ?, ai_words = ?, human_words = 0, status = 'reviewed', updated_at = datetime('now') WHERE id = ? AND novel_id = ? AND status = 'written' AND content = ?"
-    ).run(finalContent, fc, fc, chapterId, novelId, generatedContent).changes
+      "UPDATE chapter SET content = ?, word_count = ?, ai_words = ?, human_words = 0, review_json = ?, status = 'reviewed', updated_at = datetime('now') WHERE id = ? AND novel_id = ? AND status = 'written' AND content = ?"
+    ).run(finalContent, fc, fc, JSON.stringify(finalReview), chapterId, novelId, generatedContent).changes
   } else {
     committed = db.prepare(
-      "UPDATE chapter SET status = 'reviewed', updated_at = datetime('now') WHERE id = ? AND novel_id = ? AND status = 'written' AND content = ?"
-    ).run(chapterId, novelId, generatedContent).changes
+      "UPDATE chapter SET review_json = ?, status = 'reviewed', updated_at = datetime('now') WHERE id = ? AND novel_id = ? AND status = 'written' AND content = ?"
+    ).run(JSON.stringify(finalReview), chapterId, novelId, generatedContent).changes
   }
   if (!committed) {
     if (finalContent !== generatedContent) persistCandidateVersion(db, chapterId, finalContent, 'AI 待采用：生产修复期间正文已修改')
+    if (repairClaim) finishRepairRound(db, repairClaim, 'conflicted')
     return { score: 0, conflicted: true }
+  }
+  if (repairClaim) finishRepairRound(db, repairClaim, 'completed', score)
+  if (score < 75) {
+    for (const issue of deduplicateRepairIssues(finalReview.issues)) {
+      if (issue.severity === 'high' || issue.severity === 'medium') recordRepairDebt(db, chapterId, issue.problem, issue.severity)
+    }
+    if (finalReview.issues.length === 0) recordRepairDebt(db, chapterId, `生产审核未达标（评分 ${score}），请人工检查。`)
   }
 
   // 5. 回灌
@@ -330,9 +359,6 @@ async function backfillChapterState(
     },
     'production-backfill'
   )
-  const insertFact = db.prepare(
-    'INSERT INTO fact (novel_id, chapter_id, content, confirmed) VALUES (?, ?, ?, 1)'
-  )
   const insertForeshadow = db.prepare(
     "INSERT INTO foreshadow (novel_id, chapter_id, content, status) VALUES (?, ?, ?, 'laid')"
   )
@@ -343,7 +369,7 @@ async function backfillChapterState(
       db.exec('COMMIT')
       return
     }
-    for (const f of backfill.newFacts) if (f.content) insertFact.run(novelId, chapterId, f.content)
+    writePendingFacts(db, novelId, chapterId, backfill.newFacts)
     for (const f of backfill.foreshadows) if (f.content) insertForeshadow.run(novelId, chapterId, f.content)
     for (const p of backfill.paidForeshadows) {
       const row = db

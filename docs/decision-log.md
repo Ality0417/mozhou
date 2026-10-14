@@ -4,6 +4,21 @@
 
 ## 12. 技术决策日志（调研-更新闭环的落点）
 
+### 墨舟 M1 · 2026-10-14 · 本地优先、多语言、作者确认和受控修订
+
+本地设计：保留 MIT 底座，项目级档案覆盖应用语言；中文按汉字、英文按近似词计数，切换语言只回算当前正文，不重写历史 AI／人工贡献。动态档案是作者配置约束，不是平台法律政策。统一导出默认省略灵感，除非作者明确勾选。AI 事实始终先待确认；自动修订共享持久两轮预算，失败也计入以防循环。正文变更清除旧审核，不重置预算；手工编辑、快照不受此上限限制。
+
+交互回归：保存使用同步锁和组件归属保护，防同一事件循环重复提交及旧书迟到回包。CodeMirror 使用 `ChangeSet.iterChanges` 的 Text.toString() 统计插入，并忽略 React CodeMirror 的 ExternalChange 注解。官方实现依据：[CodeMirror ChangeSet](https://github.com/codemirror/state/blob/main/src/change.ts)、[React CodeMirror](https://github.com/uiwjs/react-codemirror)。
+
+安全维护只覆盖存在公告的传递依赖，不随意升级锁定的框架。修复依据：[proxy-addr 2.0.8](https://github.com/advisories/GHSA-jqcg-44mw-7w3h)、[adm-zip 0.6.1](https://github.com/advisories/GHSA-7q85-xj36-vmfc)、[brace-expansion 2.1.7](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr)、[ip-address 10.7.1](https://github.com/advisories/GHSA-j6r3-76f7-8jcv)。升级后重新执行冻结安装、全量测试、审计与构建，结果以 [本轮验证](MOZHOU-VERIFICATION.md) 为准。
+
+构建工具安全补充：完整依赖门禁（含开发依赖）另发现 Electron、Vitest/tinypool、undici、fast-uri、sharp、source-map-js、brace-expansion 的公告。Electron 同主版本升至 43.5.0；Vitest 固定 4.1.11，避免在 Vitest 3 下强塞跨主版本 tinypool，依据 [官方 Vitest 4 迁移指南](https://v4.vitest.dev/guide/migration.html) 删除已移除的 minWorkers，保留隔离线程池、maxWorkers 和全部测试。其他项按受影响主版本做最小覆盖，不变更 React/Vite/TypeScript/Express 等锁定版本。依据：[Electron 43.5.0](https://github.com/electron/electron/releases/tag/v43.5.0)、[Vitest 公告](https://github.com/advisories/GHSA-82fw-gwwq-j7x9)、[tinypool 公告](https://github.com/advisories/GHSA-85c8-ppgw-ccpr)、[sharp 公告](https://github.com/advisories/GHSA-wq5f-xc86-pv6w)、[source-map-js 公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)。
+
+http-cache-semantics 的 max-stale 公告仍有维护者争议，不能说已证实存在本应用可利用漏洞；采用官方注册表同主版本 4.3.0（不在公告 <=4.2.0 范围），并保留完整审计门禁，不配置 ignore。争议依据：[维护者回应](https://github.com/kornelski/http-cache-semantics/issues/56)。
+
+质量边界：原创固定样例和 mock 仅验证程序，不证明文笔或商业效果；不做模型权重训练，不上传个人书稿。长于 8,000 字符的去 AI 味自动改写跳过并说明原因，避免截断章尾；作者可保留正文继续审阅。广义世界观／规划变更后的审核自动失效尚未全面覆盖，重要设定调整后应重新审核。关闭上游自动更新，直到墨舟自己的安装产物和更新源完成验证。
+
+
 ### D144 · 2026-09-11 · 恢复批候选与规范授权
 
 用户已批准通过发布脚本准备 v1.1.3 候选，完成本地验证后提交推送 main 并检查对应源码 SHA 的 CI；正式 tag/GitHub Release 另行确认。已执行 `pnpm release --bump=patch`，未创建 tag。

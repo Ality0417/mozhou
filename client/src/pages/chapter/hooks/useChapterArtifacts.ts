@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
 import { novelApi } from '../../../api'
 import type { VersionDiffInfo } from '../../../types'
-import type { ChapterVersion, CtxSection, MemoryData, PendingData, ResourceDetail } from '../types'
+import type { ChapterVersion, CtxSection, ResourceDetail } from '../types'
 import type { VersionActions } from '../VersionHistoryPanel'
 import { useChapterIdentity } from './useChapterIdentity'
+import { useChapterMemory } from './useChapterMemory'
 
 // v0.26.0（批次 B）：章节产物面板（待确认/记忆面/版本/上下文/资源详情）从页面拆出（AGENTS #38 先抽 hook）
-// 回灌动作与其产物确认同置于此（confirmStates 需要关闭待确认浮层）
+// 回灌与角色状态确认保留在此，事实审阅与记忆面由 useChapterMemory 管理。
 export function useChapterArtifacts(options: {
   novelId: number
   selectedChapter: number | null
@@ -20,19 +21,7 @@ export function useChapterArtifacts(options: {
   readContent: () => string
   saveContent: () => Promise<void>
   onActionError: (msg: string | null) => void
-}): {
-  pending: PendingData | null
-  showPending: boolean
-  setShowPending: (v: boolean) => void
-  loadPending: () => Promise<void>
-  memory: MemoryData | null
-  showMemory: boolean
-  setShowMemory: (v: boolean) => void
-  memoryBusy: boolean
-  memoryPatchBusy: boolean
-  loadMemory: () => Promise<void>
-  patchCharState: (name: string, state: string, remove: boolean) => Promise<void>
-  patchFactionState: (name: string, state: string) => Promise<void>
+}): ReturnType<typeof useChapterMemory> & {
   versions: ChapterVersion[] | null
   showVersions: boolean
   setShowVersions: (v: boolean) => void
@@ -68,74 +57,7 @@ export function useChapterArtifacts(options: {
   }
   const restoreBusy = useRef(false)
 
-  // 待确认区（B0）
-  const [pending, setPending] = useState<PendingData | null>(null)
-  const [showPending, setShowPending] = useState(false)
-  const loadPending = async (): Promise<void> => {
-    const valid = begin('pending')
-    try {
-      const r = await novelApi.pending(id)
-      if (!valid()) return
-      setPending(r)
-      setShowPending(true)
-    } catch (err) {
-      if (valid()) onActionError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  // v0.20.0：记忆面（角色状态/势力状态/待确认事实——显式查看与手动修正）
-  const [memory, setMemory] = useState<MemoryData | null>(null)
-  const [showMemory, setShowMemory] = useState(false)
-  const [memoryBusy, setMemoryBusy] = useState(false)
-  const loadMemory = async (): Promise<void> => {
-    const valid = begin('memory')
-    setMemoryBusy(true)
-    try {
-      const r = await novelApi.memory(id)
-      if (!valid()) return
-      setMemory(r)
-      setShowMemory(true)
-    } catch (err) {
-      onActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setMemoryBusy(false)
-    }
-  }
-  // v0.21.0（审查 N4）：记忆面操作 busy 锁（ref 防连点并发 POST）
-  const memoryPatchBusyRef = useRef(false)
-  const [memoryPatchBusy, setMemoryPatchBusy] = useState(false)
-  const patchCharState = async (name: string, state: string, remove: boolean): Promise<void> => {
-    const valid = begin('patchMemory')
-    if (memoryPatchBusyRef.current) return
-    memoryPatchBusyRef.current = true
-    setMemoryPatchBusy(true)
-    try {
-      await novelApi.memoryCharacter(id, { name, state, remove })
-      if (!valid()) return
-      await loadMemory()
-    } catch (err) {
-      onActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      memoryPatchBusyRef.current = false
-      setMemoryPatchBusy(false)
-    }
-  }
-  const patchFactionState = async (name: string, state: string): Promise<void> => {
-    const valid = begin('patchMemory')
-    if (memoryPatchBusyRef.current) return
-    memoryPatchBusyRef.current = true
-    setMemoryPatchBusy(true)
-    try {
-      await novelApi.memoryFaction(id, { name, state })
-      if (!valid()) return
-      await loadMemory()
-    } catch (err) {
-      onActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      memoryPatchBusyRef.current = false
-      setMemoryPatchBusy(false)
-    }
-  }
+  const memoryReview = useChapterMemory(options)
 
   // A3：版本历史
   const [versions, setVersions] = useState<ChapterVersion[] | null>(null)
@@ -269,12 +191,13 @@ export function useChapterArtifacts(options: {
   // P9 D16：Esc 一键关闭浮层面板
   const closeAllPanels = (): void => {
     setShowVersions(false)
-    setShowPending(false)
+    memoryReview.setShowPending(false)
+    memoryReview.setShowMemory(false)
     setCtxSections(null)
     setResourceDetail(null)
   }
 
-  // 回灌动作与其产物确认（confirmStates 需要关闭待确认浮层，故与 backfill 同置）
+  // 角色状态入账与事实确认相互独立，不能顺带确认事实。
   const [backfillResult, setBackfillResult] = useState<Record<string, unknown> | null>(null)
   const backfill = async (): Promise<void> => {
     if (!selectedChapter) return
@@ -286,7 +209,7 @@ export function useChapterArtifacts(options: {
       const r = await novelApi.backfill(id, selectedChapter)
       if (!valid() || latest.current.readContent() !== original) return
       setBackfillResult(r)
-      notify('回灌完成：角色状态 / 新事实 / 伏笔已进入待确认区')
+      notify('回灌完成：角色状态待入账，新事实请逐条确认；伏笔已记录')
     } catch (err) {
       onActionError(err instanceof Error ? err.message : String(err))
     }
@@ -296,24 +219,12 @@ export function useChapterArtifacts(options: {
     await withBusy('confirm', async () => {
       await novelApi.confirmState(id, backfillResult.characterStates as Array<{ name: string; state: string }>)
       setBackfillResult(null)
-      setShowPending(false)
       notify('角色状态已确认入账')
     })
   }
 
   return {
-    pending,
-    showPending,
-    setShowPending,
-    loadPending,
-    memory,
-    showMemory,
-    setShowMemory,
-    memoryBusy,
-    memoryPatchBusy,
-    loadMemory,
-    patchCharState,
-    patchFactionState,
+    ...memoryReview,
     versions,
     showVersions,
     setShowVersions,

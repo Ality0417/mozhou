@@ -259,7 +259,7 @@ export function ExecutionPanel({
       <div className="workspace-section" style={{ background: 'var(--bg-card)', padding: 10 }}>
         <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 8 }}>查看与记录</div>
         <div className="action-grid">
-          <button className="sm" onClick={() => void artifacts.loadPending()} disabled={busy}>
+          <button className="sm" onClick={() => void artifacts.loadPending()} disabled={busy || artifacts.pendingBusy}>
             {actionBusy === 'pending' ? '加载中…' : '待确认区'}
           </button>
           <button className="sm" onClick={() => void artifacts.loadMemory()} disabled={busy || artifacts.memoryBusy}>
@@ -306,15 +306,17 @@ export function ExecutionPanel({
       )}
 
       {artifacts.backfillResult && (
-        <BackfillResultPanel result={artifacts.backfillResult} busy={busy} onConfirm={() => void artifacts.confirmStates()} />
+        <BackfillResultPanel result={artifacts.backfillResult} busy={busy || artifacts.pendingBusy} onConfirm={() => void artifacts.confirmStates()} onReviewFacts={() => void artifacts.loadPending()} />
       )}
 
-      {artifacts.showPending && <PendingPanel pending={artifacts.pending} onClose={() => artifacts.setShowPending(false)} />}
+      {artifacts.showPending && <PendingPanel pending={artifacts.pending} factBusy={artifacts.factReviewBusy} onReviewFact={(fact, action) => void artifacts.reviewPendingFact(fact, action)} onClose={() => artifacts.setShowPending(false)} />}
 
       {artifacts.showMemory && (
         <MemoryPanel
           memory={artifacts.memory}
           patchBusy={artifacts.memoryPatchBusy}
+          factBusy={artifacts.factReviewBusy}
+          onReviewFact={(fact, action) => void artifacts.reviewPendingFact(fact, action)}
           onPatchCharState={(name, state, remove) => void artifacts.patchCharState(name, state, remove)}
           onPatchFactionState={(name, state) => void artifacts.patchFactionState(name, state)}
           onClose={() => artifacts.setShowMemory(false)}

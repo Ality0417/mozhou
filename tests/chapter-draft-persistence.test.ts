@@ -16,7 +16,8 @@ function fixture() {
   const db = new DatabaseSync(':memory:', { timeout: 5000, enableForeignKeyConstraints: true })
   applyMigrations(db); seedIfEmpty(db)
   const novelId = Number(db.prepare("INSERT INTO novel(title) VALUES ('隔离测试书')").run().lastInsertRowid)
-  const chapterId = Number(db.prepare("INSERT INTO chapter(novel_id,title,content) VALUES (?, '测试章', '原始正文')").run(novelId).lastInsertRowid)
+  const chapterId = Number(db.prepare("INSERT INTO chapter(novel_id,title,content,review_json) VALUES (?, '测试章', '原始正文', ?)")
+    .run(novelId, JSON.stringify({ score: 40, issues: [{ severity: 'high', problem: '测试问题', suggestion: '修复' }] })).lastInsertRowid)
   return { db, novelId, chapterId }
 }
 describe('候选内容持久化', () => {

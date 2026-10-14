@@ -25,43 +25,11 @@ function updaterBusy(message = '更新模块不可用（当前环境不支持自
 }
 
 export function initUpdater(): void {
-  if (!app.isPackaged) {
-    console.log('[updater] 开发模式——跳过自动更新初始化')
-    return
-  }
-  // 便携版不支持自更新（electron-updater 限制）——跳过（设置页提示手动下载）
-  if (process.env.PORTABLE_EXECUTABLE_DIR) {
-    console.log('[updater] 便携版——不支持自动更新')
-    return
-  }
-  // v0.16.2：静态导入后直接初始化（无动态 import 竞态）
-  updaterEnabled = true
-  autoUpdater.autoDownload = false // 手动确认后下载（静默检查只发现不下载）
-  autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.on('checking-for-update', () => {
-    updaterStatus = { state: 'checking' }
-    broadcastUpdater()
-  })
-  autoUpdater.on('update-available', (info) => {
-    updaterStatus = { state: 'available', version: info.version, releaseDate: info.releaseDate, downloaded: false }
-    broadcastUpdater()
-  })
-  autoUpdater.on('update-not-available', () => {
-    updaterStatus = { state: 'up-to-date' }
-    broadcastUpdater()
-  })
-  autoUpdater.on('download-progress', (p) => {
-    updaterStatus = { state: 'downloading', percent: Math.round(p.percent), transferred: p.transferred, total: p.total }
-    broadcastUpdater()
-  })
-  autoUpdater.on('update-downloaded', (info) => {
-    updaterStatus = { state: 'downloaded', version: info.version, downloaded: true }
-    broadcastUpdater()
-  })
-  autoUpdater.on('error', (err) => {
-    updaterStatus = { state: 'error', message: String(err?.message ?? err) }
-    broadcastUpdater()
-  })
+  // 墨舟独立分支尚未建立签名发布通道，禁止从上游覆盖安装。
+  updaterEnabled = false
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  updaterStatus = { state: 'idle', message: '墨舟暂不启用自动更新，请从项目仓库获取经过验证的版本。' }
 }
 
 export function checkForUpdatesQuietly(): void {

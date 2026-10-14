@@ -107,7 +107,7 @@ describe('工作流与脱敏诊断契约', () => {
     expect(config).toContain("pool: 'threads'")
     expect(config).toContain('isolate: true')
     expect(config).toContain('maxWorkers: 4')
-    expect(config).toContain('minWorkers: 1')
+    expect(config).not.toContain('minWorkers:') // Vitest 4 移除此选项；上限仍由 maxWorkers 强制
     expect(config).not.toContain('ignoreUnhandledErrors')
   })
   it('包管理器与安全覆盖只有一个配置源', () => {
@@ -116,10 +116,10 @@ describe('工作流与脱敏诊断契约', () => {
     expect(pkg.pnpm).toBeUndefined()
     const workspace = readFileSync(join(process.cwd(), 'pnpm-workspace.yaml'), 'utf8')
     expect(workspace).toContain('onlyBuiltDependencies:')
-    expect(workspace).toContain('"fast-uri@>=3.0.0 <3.1.6": 3.1.6')
+    expect(workspace).toContain('"fast-uri@>=3.0.0 <3.1.8": 3.1.8')
     expect(workspace).not.toContain('set this to true or false')
     const lock = readFileSync(join(process.cwd(), 'pnpm-lock.yaml'), 'utf8')
-    expect(lock).toContain('fast-uri@3.1.6:')
+    expect(lock).toContain('fast-uri@3.1.8:')
     expect(lock).not.toContain('fast-uri@3.1.5:')
   })
   it('发布汇总依赖矩阵成功，源码包含 shared 根目录且不吞 diff 失败', () => {

@@ -280,7 +280,7 @@ export function AppearancePanel(): React.JSX.Element {
         </button>
       </div>
       <p className="muted" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6 }}>
-        数据存于用户目录（AppData\\Roaming\\ai-novel-studio），与安装目录分离。卸载应用：Windows 设置 &gt; 应用 &gt; AI-Novel-Studio &gt; 卸载（会同时清除数据）；
+        数据存于用户目录（AppData\\Roaming\\mozhou），与安装目录分离。卸载应用：Windows 设置 &gt; 应用 &gt; 墨舟 &gt; 卸载（卸载前请先备份书稿）；
         便携版 = 删除文件夹与旁 data/ 目录。
       </p>
       {confirmDialog}

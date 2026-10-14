@@ -11,6 +11,7 @@ import { createWorldsRouter } from './routes/worlds'
 import { createVolumesRouter } from './routes/volumes'
 import { createChapterExecutionRouter } from './routes/chapters'
 import { createExportRouter } from './routes/export'
+import { createWritingProfileRouter } from './routes/writingProfile'
 import { createAutomationRouter, createJobsRouter } from './routes/automation'
 import { createAnalysisRouter } from './routes/analysis'
 import { createStyleRouter } from './routes/style'
@@ -50,6 +51,7 @@ export function createApp(db: DatabaseSync, isPaused: () => boolean = () => fals
   app.use('/api/novels', createVolumesRouter(db))
   app.use('/api/novels', createChapterExecutionRouter(db))
   app.use('/api/novels', createExportRouter(db))
+  app.use('/api/novels', createWritingProfileRouter(db))
   app.use('/api/novels', createAutomationRouter(db))
   app.use('/api/novels', createAnalysisRouter(db))
   app.use('/api/novels', createStyleRouter(db))

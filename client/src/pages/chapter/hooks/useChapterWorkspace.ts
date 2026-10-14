@@ -1,7 +1,9 @@
 import { useAiDrafts } from './useAiDrafts'
 import type { WorkspaceTab } from '../WorkspaceTabs'
 import { useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiFetch } from '../../../api'
+import type { WritingProfile } from '../../../../../shared/src/writingProfile'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { usePrompt } from '../../../components/PromptDialog'
@@ -31,6 +33,8 @@ export function useChapterWorkspace() {
   const navigate = useNavigate()
   const id = Number(novelId)
   const queryClient = useQueryClient()
+  const writingProfile = useQuery({ queryKey: ['writing-profile', id], queryFn: () => apiFetch(`/novels/${id}/writing-profile`) as Promise<{ profile: WritingProfile }> })
+  const writingLanguage = writingProfile.data?.profile.language ?? 'zh-CN'
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   // v0.22.0（审查 ALOW）：themed confirm 统一
@@ -71,6 +75,7 @@ export function useChapterWorkspace() {
   // R7：编辑会话（正文状态/保存/空内容保护/字数分离/选区与 AI 插入）
   const session = useEditorSession({
     novelId: id,
+    writingLanguage,
     selectedChapter,
     editorRef,
     streamingRef,
@@ -255,5 +260,5 @@ export function useChapterWorkspace() {
     }
   })
 
-  return { ai, requestAi, assistantTab, setAssistantTab, mobilePanel, setMobilePanel, chapterPromptElement, confirmDialog, fileOps, focusMode, setFocusMode, id, list, chaptersLoading, chaptersError, selectedChapter, selectChapter, artifacts, askChapterTitle, feedback, actions, invalidate, navigate, chapter, hanCount, statsShow, chapterStats, saving, streaming, contentLoading, guidanceDraft, setGuidanceDraft, saveContent, generate, viewMode, setViewMode, selectionInfo, content, applySelection, insertAt, chapterIdx, dirtyRef, setContent, updateSelectionInfo, trackHumanWords, quickWords, suggestion, editorRef, streamStat, fixDoneRef, backfillDoneRef, snapshotDoneRef, savedContentRef, cancelGenerate, confirmFn, candidates, buildInclude, session }
+  return { writingLanguage, ai, requestAi, assistantTab, setAssistantTab, mobilePanel, setMobilePanel, chapterPromptElement, confirmDialog, fileOps, focusMode, setFocusMode, id, list, chaptersLoading, chaptersError, selectedChapter, selectChapter, artifacts, askChapterTitle, feedback, actions, invalidate, navigate, chapter, hanCount, statsShow, chapterStats, saving, streaming, contentLoading, guidanceDraft, setGuidanceDraft, saveContent, generate, viewMode, setViewMode, selectionInfo, content, applySelection, insertAt, chapterIdx, dirtyRef, setContent, updateSelectionInfo, trackHumanWords, quickWords, suggestion, editorRef, streamStat, fixDoneRef, backfillDoneRef, snapshotDoneRef, savedContentRef, cancelGenerate, confirmFn, candidates, buildInclude, session }
 }

@@ -21,7 +21,7 @@ export function HelpPage(): React.JSX.Element {
       <div className="panel" style={{ marginBottom: 16, background: 'var(--bg-card)' }}>
         <h2 style={{ marginBottom: 6 }}>三步完成一本小说</h2>
         <p className="muted t3">
-          AI 小说创作工作台是一个「导演式」写作系统：AI 负责规划、生成、审核与修复，你负责定方向、把关与确认。
+          墨舟 · AI 小说工作台是一个「导演式」写作系统：AI 负责规划、生成、审核与修复，你负责定方向、把关与确认。
         </p>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>

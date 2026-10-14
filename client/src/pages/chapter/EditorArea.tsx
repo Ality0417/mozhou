@@ -13,6 +13,7 @@ export type ViewMode = 'edit' | 'read'
 export interface ChapterToolbarProps {
   title: string
   hanCount: number
+  wordUnit?: string
   saving: boolean
   dirty: boolean
   saveError: string | null
@@ -49,7 +50,7 @@ export function ChapterToolbar(p: ChapterToolbarProps): React.JSX.Element {
         }}><input aria-label="章节标题" value={draft} disabled={titleBusy} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setDraft(null) }} autoFocus />
           <button disabled={titleBusy || !draft.trim()}>确定</button><button type="button" disabled={titleBusy} onClick={() => setDraft(null)}>取消</button></form>}
       {titleError && <span role="alert">{titleError}</span>}
-      <div className="chapter-toolbar-meta">{p.hanCount.toLocaleString()} 字 · <span role="status" className="chapter-save-status" data-state={state} title={p.saveError ?? undefined}>{status}</span></div>
+      <div className="chapter-toolbar-meta">{p.hanCount.toLocaleString()} {p.wordUnit ?? '字'} · <span role="status" className="chapter-save-status" data-state={state} title={p.saveError ?? undefined}>{status}</span></div>
     </div>
     <div className="chapter-toolbar-actions">
       <button className="workspace-mobile-tools" onClick={() => p.onTogglePanel('chapters')}>章节</button>

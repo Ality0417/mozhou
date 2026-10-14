@@ -1,3 +1,5 @@
+> 墨舟分支说明：以下为上游历史文档。当前工作范围及验证状态以 README.md 和 docs/MOZHOU-VERIFICATION.md 为准；上游提及的授权、密钥位置及个人数据不是本项目授权。
+
 # AI-Novel-Studio · AI Agent 协作者手册
 
 > **新 AI agent 进场必读**（配合 `AGENTS.md` 与 `PLAN.md`——当前版；历史阶段编年史在 `docs/archive/PLAN-history.md`）。

@@ -41,7 +41,7 @@ export function createWindow(): void {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    title: 'AI 小说创作工作台',
+    title: '墨舟 · AI 小说工作台',
     // P12 B3：无边框标题栏（Windows 保留原生窗口按钮 + 自定义标题栏拖拽区）
     titleBarStyle: 'hidden',
     ...(process.platform !== 'darwin'

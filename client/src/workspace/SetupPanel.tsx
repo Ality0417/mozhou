@@ -3,6 +3,7 @@ import { ErrorMsg } from '../components/ErrorMsg'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { novelApi } from '../api'
 import { useActionRun } from '../hooks/useActionRun'
+import { ProjectWritingPanel } from './ProjectWritingPanel'
 
 export function SetupPanel({ novelId, onDirtyChange }: { novelId: number; onDirtyChange?: (dirty: boolean) => void }): React.JSX.Element {
   const queryClient = useQueryClient()
@@ -11,7 +12,9 @@ export function SetupPanel({ novelId, onDirtyChange }: { novelId: number; onDirt
   const [titles, setTitles] = useState<string[]>([])
   const [title, setTitle] = useState('')
   const dirtyRef = useRef(false)
-  const notifyDirty = (v: boolean): void => { dirtyRef.current = v; onDirtyChange?.(v) }
+  const profileDirtyRef = useRef(false)
+  const notifyDirty = (v: boolean): void => { dirtyRef.current = v; onDirtyChange?.(v || profileDirtyRef.current) }
+  const notifyProfileDirty = (v: boolean): void => { profileDirtyRef.current = v; onDirtyChange?.(v || dirtyRef.current) }
   const titleInitRef = useRef(false)
   const [notes, setNotes] = useState('')
   // P11-3：流派自定义
@@ -84,6 +87,7 @@ export function SetupPanel({ novelId, onDirtyChange }: { novelId: number; onDirt
   return (
     <div className="col">
       {error && <ErrorMsg error={error} />}
+      <ProjectWritingPanel key={novelId} novelId={novelId} onDirtyChange={notifyProfileDirty} />
 
       {/* 方向候选 */}
       <div className="panel">

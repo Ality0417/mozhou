@@ -11,12 +11,14 @@ import { getRouteConfig } from './routes'
 import { buildCandidates, getActiveModelOverride, RETRYABLE_STATUS } from './candidates'
 import { buildBody, extractUsage } from './request'
 import type { LlmCallOptions, LlmResult } from './types'
+import { withProjectLanguage } from '../writingProfile'
 
 export async function callLlm(
   db: DatabaseSync,
   taskType: TaskType,
   opts: LlmCallOptions
 ): Promise<LlmResult> {
+  opts = { ...opts, messages: withProjectLanguage(db, opts.novelId, opts.messages) }
   const route = getRouteConfig(db, taskType)
   if (!route) throw new ConfigError(`no model route for task: ${taskType}`)
   if (!route.apiKeyEncrypted) {

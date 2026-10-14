@@ -505,7 +505,8 @@ const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (chapter_id, operation_id)
     )`]
-  }
+  },
+  { version: 25, statements: [`ALTER TABLE novel ADD COLUMN writing_profile_json TEXT`] }
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version

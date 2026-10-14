@@ -4,7 +4,7 @@
 // 空正文不建版本；任何失败整体回滚。
 // note/title 变体（R4.3）：方案流水线产出的版本注释与标题覆盖也经此唯一入口落库。
 import { DatabaseSync } from 'node:sqlite'
-import { countCJKChars } from '../shared/text'
+import { countNovelWords } from '../writingProfile'
 import type { ClaimedChapter, PersistedGeneration } from './types'
 
 
@@ -14,7 +14,7 @@ export function persistGeneratedChapter(
   generation: PersistedGeneration
 ): { wordCount: number; persisted: boolean; candidateVersionId?: number } {
   const content = generation.content
-  const wordCount = countCJKChars(content)
+  const wordCount = countNovelWords(db, claim.novelId, content)
   const GUARD = "id=? AND novel_id=? AND generation_token=? AND status='generating'"
   const guardParams = [claim.id, claim.novelId, claim.generationToken] as const
   const note = generation.note ?? (generation.aborted ? 'AI 生成（中止）' : 'AI 生成')
@@ -51,14 +51,14 @@ export function persistGeneratedChapter(
       generation.title !== undefined
         ? db
             .prepare(
-              `UPDATE chapter SET title = CASE WHEN ? != '' THEN ? ELSE title END, content=?, word_count=?, status='written', ai_words=?, human_words=0, updated_at=datetime('now') WHERE ${GUARD}`
+              `UPDATE chapter SET title = CASE WHEN ? != '' THEN ? ELSE title END, review_json=CASE WHEN content IS NOT ? OR (? != '' AND title IS NOT ?) THEN '{}' ELSE review_json END, content=?, word_count=?, status='written', ai_words=?, human_words=0, updated_at=datetime('now') WHERE ${GUARD}`
             )
-            .run(generation.title, generation.title, content, wordCount, wordCount, ...guardParams)
+            .run(generation.title, generation.title, content, generation.title, generation.title, content, wordCount, wordCount, ...guardParams)
         : db
             .prepare(
-              `UPDATE chapter SET content=?, word_count=?, status='written', ai_words=?, human_words=0, updated_at=datetime('now') WHERE ${GUARD}`
+              `UPDATE chapter SET review_json=CASE WHEN content != ? THEN '{}' ELSE review_json END, content=?, word_count=?, status='written', ai_words=?, human_words=0, updated_at=datetime('now') WHERE ${GUARD}`
             )
-            .run(content, wordCount, wordCount, ...guardParams)
+            .run(content, content, wordCount, wordCount, ...guardParams)
     if (Number(result.changes) === 0) throw staleClaimError()
 
     db.exec('COMMIT')

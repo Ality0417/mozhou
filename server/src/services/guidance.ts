@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { getSavedWritingProfile, buildProfileRules } from './writingProfile'
 
 // P19 ①：两级创作引导工具
 // 书级引导（novel.guidance 持久化）+ 单次引导（本次请求，不持久化）
@@ -65,4 +66,11 @@ export function buildGuidanceBlock(bookGuidance: string, perCallGuidance?: strin
   if (bookGuidance) parts.push(`【创作引导】${bookGuidance}`)
   if (perCallGuidance && perCallGuidance.trim()) parts.push(`【本次引导】${perCallGuidance.trim()}`)
   return parts.join('\n')
+}
+
+export function getNovelWritingRules(db: DatabaseSync, novelId?: number | null): string {
+  const settings = getWritingSettings(db)
+  const profile = novelId ? getSavedWritingProfile(db, novelId) : null
+  if (!profile) return buildWritingRules(settings)
+  return [buildWritingRules({ ...settings, lang: 'simplified' }), buildProfileRules(profile)].filter(Boolean).join('\n')
 }

@@ -1,5 +1,6 @@
 import { CharStateAdd, FactionStateEdit } from './MemoryInputs'
 import type { MemoryData } from './types'
+import { PendingFactList, type FactReviewProps } from './PendingFactList'
 
 // v0.25.0（审查 S1）：从 ChapterExecutionPage 拆出的审核结果与记忆面面板。
 
@@ -92,8 +93,10 @@ export function MemoryPanel({
   patchBusy,
   onPatchCharState,
   onPatchFactionState,
-  onClose
-}: {
+  onClose,
+  factBusy,
+  onReviewFact
+}: FactReviewProps & {
   memory: MemoryData | null
   patchBusy: boolean
   onPatchCharState: (name: string, state: string, remove: boolean) => void
@@ -178,12 +181,7 @@ export function MemoryPanel({
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 12, marginTop: 10 }}>
-            <span className="muted">待确认事实（{memory.pendingFacts.length}）：</span>
-            {memory.pendingFacts.map((f) => (
-              <div key={f.id}>• {f.content}</div>
-            ))}
-          </div>
+          <PendingFactList facts={memory.pendingFacts} factBusy={factBusy} onReviewFact={onReviewFact} />
         </>
       )}
     </div>

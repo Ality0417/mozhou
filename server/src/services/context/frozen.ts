@@ -2,7 +2,7 @@
 // [冻结前缀区] 系统提示 → 书级合约(framing) → 世界观手册 → 角色账本 → 外部资料 → 引导 → 写作要求
 // hash 版本化：任一组成变化即缓存失效；顺序受 context-contract 测试锁定，禁止调整。
 import type { DatabaseSync } from 'node:sqlite'
-import { getGuidance, getWritingSettings, buildWritingRules } from '../guidance'
+import { getGuidance, getNovelWritingRules } from '../guidance'
 import { hashOf } from './hash'
 import type { FrozenContext } from './types'
 
@@ -117,7 +117,7 @@ export function buildFrozenContext(db: DatabaseSync, novelId: number): FrozenCon
   // P19 ①：书级创作引导（冻结区——改引导=hash 变化=缓存失效，语义正确）
   const guidance = getGuidance(db, novelId)
   // P19 ②⑤：写作偏好规则（语言/格式/模式；非默认才注入；改设置=hash 变=缓存失效）
-  const writingRules = buildWritingRules(getWritingSettings(db))
+  const writingRules = getNovelWritingRules(db, novelId)
   return {
     contract,
     world,

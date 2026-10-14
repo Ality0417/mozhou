@@ -1,5 +1,6 @@
 import { Wand2 } from 'lucide-react'
-import { countCjk, type CtxSection, type PendingData, type ProofreadIssue, type ResourceDetail } from './types'
+import { countCjk, type CtxSection, type ProofreadIssue, type ResourceDetail } from './types'
+export { PendingPanel } from './PendingPanel'
 
 // v0.25.0（审查 S1）：从 ChapterExecutionPage 拆出的纯展示面板。
 // 这些组件无自身状态、仅依赖 props，可独立测试，也让主页面从 1989 行降下来。
@@ -76,56 +77,17 @@ export function ResourceDetailPanel({
   )
 }
 
-/** 待确认区（未确认事实 / 待确认角色） */
-export function PendingPanel({
-  pending,
-  onClose
-}: {
-  pending: PendingData | null
-  onClose: () => void
-}): React.JSX.Element {
-  return (
-    <div className="panel" style={{ marginTop: 12, background: 'var(--bg-card)' }}>
-      <div className="row justify-between">
-        <strong>待确认区</strong>
-        <button onClick={onClose} style={{ fontSize: 12, padding: '2px 6px' }}>
-          关闭
-        </button>
-      </div>
-      {pending && pending.pendingFacts.length > 0 && (
-        <div style={{ marginTop: 8, fontSize: 12 }}>
-          <span className="muted">未确认事实：</span>
-          {pending.pendingFacts.map((f) => (
-            <div key={f.id}>• {f.content}</div>
-          ))}
-        </div>
-      )}
-      {pending && pending.pendingCharacters.length > 0 && (
-        <div style={{ marginTop: 8, fontSize: 12 }}>
-          <span className="muted">待确认角色：</span>
-          {pending.pendingCharacters.map((c) => (
-            <div key={c.id}>• {c.name}</div>
-          ))}
-        </div>
-      )}
-      {pending && pending.pendingFacts.length === 0 && pending.pendingCharacters.length === 0 && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          暂无待确认项
-        </p>
-      )}
-    </div>
-  )
-}
-
 /** 回灌提取结果（待确认的角色状态 / 新事实 / 新伏笔） */
 export function BackfillResultPanel({
   result,
   busy,
-  onConfirm
+  onConfirm,
+  onReviewFacts
 }: {
   result: Record<string, unknown>
   busy: boolean
   onConfirm: () => void
+  onReviewFacts?: () => void
 }): React.JSX.Element {
   return (
     <div className="panel" style={{ marginTop: 12, background: 'var(--bg-card)' }}>
@@ -143,10 +105,11 @@ export function BackfillResultPanel({
       {Array.isArray(result.newFacts) &&
         (result.newFacts as Array<{ content: string }>).length > 0 && (
           <div style={{ marginTop: 8, fontSize: 12 }}>
-            <span className="muted">新事实：</span>
+            <span className="muted">新事实（尚未确认，不会自动入账）：</span>
             {result.newFacts.map((f, i) => (
               <div key={i}>• {f.content}</div>
             ))}
+            {onReviewFacts && <button className="sm" disabled={busy} onClick={onReviewFacts}>逐条核对事实</button>}
           </div>
         )}
       {Array.isArray(result.foreshadows) &&

@@ -4,6 +4,7 @@ import { novelApi } from '../../api'
 import type { ExportPreview } from '../../types'
 import type { ExportFormat } from './EditorArea'
 import { Loading } from '../../components/Loading'
+import { countWritingUnits, LANGUAGE_LABELS, PROFILE_LABELS } from '../../../../shared/src/writingProfile'
 
 // v1.0 后续（A5 导出预览）：整本书导出前的排版预览——复用 .prose 排印类（CJK 悬垂标点 + --prose-* token），
 // 让用户在下载 TXT/MD/EPUB/DOCX 前先确认整本书的版面效果，避免导出后才发现格式问题。
@@ -27,10 +28,10 @@ function renderLine(line: string, idx: number): React.JSX.Element {
 }
 
 const FORMAT_HINT: Record<ExportFormat, string> = {
-  txt: '纯文本（TXT）· 含 UTF-8 BOM，兼容旧版 Windows 记事本',
+  txt: '纯文本（TXT）· BOM / 换行使用本书投稿档案',
   md: 'Markdown · 保留标题层级，适合二次编辑',
   epub: '电子书（EPUB）· 适合阅读器 / 手机排版',
-  docx: 'Word 文档（DOCX）· 投稿平台事实标准'
+  docx: 'Word 文档（DOCX）· 是否接受需查目标平台'
 }
 
 export function ExportPreviewModal({
@@ -70,7 +71,7 @@ export function ExportPreviewModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const totalWords = preview ? preview.chapters.reduce((sum, c) => sum + c.content.length, 0) : 0
+  const totalWords = preview ? preview.chapters.reduce((sum, c) => sum + countWritingUnits(c.content, preview.profile?.language ?? 'zh-CN'), 0) : 0
 
   return (
     <div
@@ -99,7 +100,7 @@ export function ExportPreviewModal({
             <h2 style={{ fontSize: 15, margin: 0 }}>导出预览 · {preview?.title ?? '加载中'}</h2>
             {preview && (
               <span className="muted t-small">
-                {preview.chapters.length} 章 · {totalWords.toLocaleString()} 字
+                {preview.chapters.length} 章 · {totalWords.toLocaleString()} {preview.profile?.language === 'en' ? '词' : '字'}
               </span>
             )}
           </div>
@@ -121,6 +122,7 @@ export function ExportPreviewModal({
             </button>
           ))}
           <span className="muted t-small" style={{ alignSelf: 'center' }}>{FORMAT_HINT[format]}</span>
+          {preview?.profile && <span className="muted t-small">{LANGUAGE_LABELS[preview.profile.language]} · {PROFILE_LABELS[preview.profile.preset]} · 通用格式，非平台合规认证</span>}
         </div>
 
         {/* 正文预览 */}
@@ -144,8 +146,8 @@ export function ExportPreviewModal({
               {preview.chapters.length === 0 ? (
                 <p className="muted">本书还没有已写正文（需状态为「已写 / 已审 / 已完成」的章节才能导出）。</p>
               ) : (
-                preview.chapters.map((c) => (
-                  <div key={c.title} style={{ marginBottom: 'var(--sp-5)' }}>
+                preview.chapters.map((c, index) => (
+                  <div key={index} style={{ marginBottom: 'var(--sp-5)' }}>
                     <h2 style={{ fontSize: 'var(--fs-18)', fontWeight: 600, margin: '0 0 var(--sp-3)' }}>
                       {c.title || '（未命名章节）'}
                     </h2>

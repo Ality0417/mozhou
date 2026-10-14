@@ -1,3 +1,4 @@
+import { countNovelWords } from '../../services/writingProfile'
 // 章节执行路由：版本历史 / 快照 / 详情 / diff / 恢复
 import type { Router } from 'express'
 import type { DatabaseSync } from 'node:sqlite'
@@ -29,7 +30,7 @@ export function registerChapterVersionRoutes(router: Router, db: DatabaseSync): 
         id: r.id,
         note: r.note,
         createdAt: r.created_at,
-        wordCount: (r.content.match(/[\u4e00-\u9fff]/g) ?? []).length,
+        wordCount: countNovelWords(db, novelId, r.content),
         preview: r.content.slice(0, 80)
       }))
     })
@@ -115,7 +116,7 @@ export function registerChapterVersionRoutes(router: Router, db: DatabaseSync): 
         res.status(400).json({ error: '不能恢复空正文版本' })
         return
       }
-      const restoredWordCount = (row.content.match(/[\u4e00-\u9fff]/g) ?? []).length
+      const restoredWordCount = countNovelWords(db, novelId, row.content)
       const result = commitChapterSave(db, novelId, chapterId, protocol, { kind: 'restore', versionId, ...protocol }, () => {
         const current = db
           .prepare('SELECT content FROM chapter WHERE id = ? AND novel_id = ?')
@@ -125,8 +126,8 @@ export function registerChapterVersionRoutes(router: Router, db: DatabaseSync): 
         }
         // 版本恢复按整章替换计数，与快照和回执同事务。
         db.prepare(
-          "UPDATE chapter SET content = ?, word_count = ?, ai_words = ?, human_words = 0, updated_at = datetime('now') WHERE id = ? AND novel_id = ?"
-        ).run(row.content, restoredWordCount, restoredWordCount, chapterId, novelId)
+          "UPDATE chapter SET review_json = CASE WHEN content != ? THEN '{}' ELSE review_json END, status = CASE WHEN content != ? THEN 'written' ELSE status END, content = ?, word_count = ?, ai_words = ?, human_words = 0, updated_at = datetime('now') WHERE id = ? AND novel_id = ?"
+        ).run(row.content, row.content, row.content, restoredWordCount, restoredWordCount, chapterId, novelId)
       })
       res.json({ ...result, content: row.content, wordCount: restoredWordCount })
     } catch (err) {

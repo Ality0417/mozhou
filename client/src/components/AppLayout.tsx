@@ -161,7 +161,7 @@ export function AppLayout(): React.JSX.Element {
       {/* P12 B3：自定义标题栏（拖拽区 + 原生窗口按钮由 titleBarOverlay 保留） */}
       <div className="titlebar">
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dim)' }}>
-          AI 小说创作工作台
+          墨舟 · AI 小说工作台
         </span>
         <span className="muted" style={{ fontSize: 11, marginLeft: 10 }}>
           v{__APP_VERSION__}

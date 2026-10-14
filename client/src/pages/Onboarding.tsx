@@ -4,9 +4,10 @@ import { apiFetch } from '../api'
 
 interface OnboardingProps {
   onDone: () => void
+  onLocalMode?: () => void
 }
 
-export function Onboarding({ onDone }: OnboardingProps): React.JSX.Element {
+export function Onboarding({ onDone, onLocalMode }: OnboardingProps): React.JSX.Element {
   const [step, setStep] = useState(1)
   const [apiKey, setApiKey] = useState('')
   const [providerChoice, setProviderChoice] = useState('deepseek')
@@ -80,7 +81,7 @@ export function Onboarding({ onDone }: OnboardingProps): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 520, margin: '80px auto', padding: 24 }} className="panel">
-      <h1 style={{ marginBottom: 4 }}>欢迎使用 AI 小说创作工作台</h1>
+      <h1 style={{ marginBottom: 4 }}>欢迎使用 墨舟 · AI 小说工作台</h1>
       <p className="muted">三步完成配置，开始你的第一本书</p>
 
       {step === 1 && (
@@ -152,6 +153,10 @@ export function Onboarding({ onDone }: OnboardingProps): React.JSX.Element {
         </div>
       )}
 
+      {onLocalMode && step !== 3 && <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <button disabled={busy} onClick={onLocalMode}>先本地体验（无需 API Key）</button>
+        <p className="muted t-small">可创建项目、手动写作、载入演示书和导出。AI 生成需稍后在设置中连接模型；本地体验不会模拟或冒充真实生成。</p>
+      </div>}
       {step === 3 && (
         <div className="col" style={{ marginTop: 20 }}>
           <div>

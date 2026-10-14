@@ -108,7 +108,7 @@ describe('v0.10.0 批B-I2 质量债自动修复', () => {
     const db = makeDb()
     const novelId = Number(db.prepare("INSERT INTO novel (title, inspiration, status) VALUES ('书', 'x', 'planned')").run().lastInsertRowid)
     const chapterId = Number(
-      db.prepare("INSERT INTO chapter (novel_id, title, content, review_json, fix_history_json) VALUES (?, '章', '正文内容', '{}', ?)").run(
+      db.prepare("INSERT INTO chapter (novel_id, title, content, review_json, fix_history_json) VALUES (?, '章', '正文内容', '{\"score\":40,\"issues\":[]}', ?)").run(
         novelId,
         JSON.stringify([{ round: 1, issues: 1 }, { round: 2, issues: 1 }])
       ).lastInsertRowid
@@ -128,7 +128,7 @@ describe('v0.10.0 批B-I2 质量债自动修复', () => {
         "INSERT INTO chapter (novel_id, title, content, review_json, fix_history_json) VALUES (?, '章', '正文', ?, ?)"
       ).run(
         novelId,
-        JSON.stringify({ issues: [{ severity: 'high', problem: '角色动机模糊导致剧情牵强', suggestion: '补充动机' }] }),
+        JSON.stringify({ score: 40, issues: [{ severity: 'high', problem: '角色动机模糊导致剧情牵强', suggestion: '补充动机' }] }),
         JSON.stringify([{ round: 1, issues: 1, signature: '角色动机模糊导致剧情牵强' }])
       ).lastInsertRowid
     )

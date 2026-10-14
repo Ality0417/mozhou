@@ -5,9 +5,19 @@ onlyBuiltDependencies:
 
 # 安全覆盖统一在此维护，禁止与 package.json.pnpm 重复配置。
 overrides:
-  adm-zip: ^0.6.0
-  "fast-uri@>=3.0.0 <3.1.6": 3.1.6
+  adm-zip: 0.6.1
+  "fast-uri@>=3.0.0 <3.1.8": 3.1.8
   "qs@<6.16.0": 6.16.0
   "js-yaml@>=4.0.0 <4.3.2": 4.3.2
   "@xmldom/xmldom@>=0.7.0 <0.8.15": 0.8.15
-  "sharp@<0.35.4": 0.35.4
+  "sharp@<0.35.5": 0.35.5
+  "proxy-addr@<2.0.8": 2.0.8
+  "brace-expansion@>=2.0.0 <2.1.7": 2.1.7
+  "ip-address@<=10.7.0": 10.7.1
+  "brace-expansion@<1.1.21": 1.1.21
+  "brace-expansion@>=4.0.0 <5.0.12": 5.0.12
+  "undici@>=6.0.0 <6.28.1": 6.28.1
+  "undici@>=7.0.0 <7.29.1": 7.29.1
+  "undici@>=8.0.0 <8.10.2": 8.10.2
+  "source-map-js@<1.2.2": 1.2.2
+  "http-cache-semantics@<4.3.0": 4.3.0

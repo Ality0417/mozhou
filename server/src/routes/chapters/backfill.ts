@@ -6,6 +6,7 @@ import { buildBackfillContext } from '../../services/context/dynamic'
 import { callLlmJson } from '../../services/jsonSafe'
 import { writeCharacterStates, writeFactionStates } from '../../services/ledger'
 import { updateSmartContext } from '../../services/smartContext'
+import { listPendingFacts, reviewFact, writePendingFacts } from '../../services/facts'
 
 export function registerChapterBackfillRoutes(router: Router, db: DatabaseSync): void {
   // ---------- 状态回灌（提取 → 待确认区） ----------
@@ -69,19 +70,21 @@ export function registerChapterBackfillRoutes(router: Router, db: DatabaseSync):
         'backfill'
       )
 
-      // 写入待确认区（fact 表 confirmed=0；foreshadow 表 status=laid；角色状态写入 ledger 待确认）
-      const insertFact = db.prepare(
-        'INSERT INTO fact (novel_id, chapter_id, content, confirmed) VALUES (?, ?, ?, 0)'
-      )
+      // 新事实待确认；伏笔直接记录；角色状态在响应中交给作者单独确认入账。
       const insertForeshadow = db.prepare(
         'INSERT INTO foreshadow (novel_id, chapter_id, content, status) VALUES (?, ?, ?, ?)'
       )
       const paidCount = result.paidForeshadows.length
       db.exec('BEGIN')
       try {
-        for (const f of result.newFacts) {
-          if (f.content) insertFact.run(novelId, chapterId, f.content)
+        const current = db.prepare('SELECT content FROM chapter WHERE id = ? AND novel_id = ?')
+          .get(chapterId, novelId) as { content: string } | undefined
+        if (!current || current.content !== chapter.content) {
+          db.exec('ROLLBACK')
+          res.status(409).json({ error: '正文已变更，请重新提取事实' })
+          return
         }
+        writePendingFacts(db, novelId, chapterId, result.newFacts)
         for (const f of result.foreshadows) {
           if (f.content) insertForeshadow.run(novelId, chapterId, f.content, 'laid')
         }
@@ -157,10 +160,7 @@ export function registerChapterBackfillRoutes(router: Router, db: DatabaseSync):
   // 待确认区查询（未确认事实 + 角色 pending）
   router.get('/:novelId/pending', (req, res) => {
     const novelId = Number(req.params.novelId)
-    const facts = db
-      // v0.17.0（审查 M5）：DAO 边界 camelCase（此前 chapter_id 直出）
-      .prepare('SELECT id, content, chapter_id AS chapterId FROM fact WHERE novel_id = ? AND confirmed = 0')
-      .all(novelId) as Array<Record<string, unknown>>
+    const facts = listPendingFacts(db, novelId)
     const chars = db
       .prepare('SELECT id, name, profile_json FROM character WHERE novel_id = ? AND status = \'pending\'')
       .all(novelId) as Array<Record<string, unknown>>
@@ -174,6 +174,29 @@ export function registerChapterBackfillRoutes(router: Router, db: DatabaseSync):
     })
   })
 
+  router.post('/:novelId/facts/:factId/review', (req, res, next) => {
+    try {
+      const novelId = z.coerce.number().int().positive().parse(req.params.novelId)
+      const factId = z.coerce.number().int().positive().parse(req.params.factId)
+      const input = z.object({
+        action: z.enum(['confirm', 'reject']),
+        expectedContent: z.string().min(1)
+      }).parse(req.body)
+      const result = reviewFact(db, novelId, factId, input)
+      if (result === 'missing') {
+        res.status(404).json({ error: '事实不存在或已被移除' })
+        return
+      }
+      if (result === 'conflict') {
+        res.status(409).json({ error: '事实已变更或已确认，请刷新后重新核对' })
+        return
+      }
+      res.json({ ok: true, changed: result === 'changed' })
+    } catch (err) {
+      next(err)
+    }
+  })
+
   // ---------- v0.20.0（NovelClaw 学习组）：记忆面——状态机显式查看与手动修正 ----------
   router.get('/:novelId/memory', (req, res) => {
     const novelId = Number(req.params.novelId)
@@ -183,9 +206,7 @@ export function registerChapterBackfillRoutes(router: Router, db: DatabaseSync):
     const world = db.prepare('SELECT factions_json FROM world WHERE novel_id = ?').get(novelId) as
       | { factions_json: string }
       | undefined
-    const facts = db
-      .prepare('SELECT id, content FROM fact WHERE novel_id = ? AND confirmed = 0')
-      .all(novelId) as Array<{ id: number; content: string }>
+    const facts = listPendingFacts(db, novelId)
     let factions: Array<{ name: string; currentState?: string }> = []
     try {
       factions = JSON.parse(world?.factions_json || '[]') as Array<{ name: string; currentState?: string }>

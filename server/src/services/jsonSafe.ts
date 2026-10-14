@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { callLlm } from './llm/caller'
 import type { LlmCallOptions } from './llm/types'
-import { getGuidance, buildGuidanceBlock, getWritingSettings, buildWritingRules } from './guidance'
+import { getGuidance, buildGuidanceBlock, getNovelWritingRules } from './guidance'
 import type { TaskType } from '../db/seed'
 
 export const MAX_RETRIES = 3
@@ -45,7 +45,7 @@ export async function callLlmJson<T>(
     }
   }
   // P19 ②⑤：写作偏好规则（语言/格式/模式；偏离默认才注入，改设置→hash 变→缓存失效）
-  const writingRules = buildWritingRules(getWritingSettings(db))
+  const writingRules = getNovelWritingRules(db, opts.novelId)
   if (writingRules && guidedOpts.messages[0]?.content) {
     guidedOpts = {
       ...guidedOpts,

@@ -7,6 +7,8 @@ import { callLlmJson } from '../../services/jsonSafe'
 import { fixChapterOnce } from '../../services/debtFix'
 import { deriveNeedsFix } from '../../services/reviewPolicy'
 import { detectLocalIssues } from '../../services/proofread'
+import { ChapterSaveConflict } from '../../services/chapterSave'
+import { deduplicateRepairIssues, recordRepairDebt } from '../../services/repairBudget'
 
 // 审核（可复用：首次审核 + 修复后重审）
 async function performReview(
@@ -36,43 +38,16 @@ async function performReview(
     },
     (obj) => {
       const r = obj as Record<string, unknown>
-      if (typeof r.score !== 'number') return null
+      if (typeof r.score !== 'number' || !Number.isFinite(r.score)) return null
       return {
         score: r.score,
         strengths: Array.isArray(r.strengths) ? r.strengths.map(String) : [],
-        issues: Array.isArray(r.issues)
-          ? r.issues.map((i) => {
-              const x = i as Record<string, unknown>
-              return {
-                severity: String(x.severity ?? 'medium'),
-                location: String(x.location ?? ''),
-                problem: String(x.problem ?? ''),
-                suggestion: String(x.suggestion ?? '')
-              }
-            })
-          : [],
+        issues: deduplicateRepairIssues(r.issues).map(issue => ({ ...issue, location: issue.location ?? '' })),
         needsFix: Boolean(r.needsFix)
       }
     },
     'review'
   )
-  // 记录质量债务（high/medium 问题）
-  // P20（C7）：按章节+签名去重（同章重复审核不重复插）；修复时置 resolved
-  const insertDebt = db.prepare(
-    `INSERT OR IGNORE INTO quality_debt (chapter_id, issue, severity)
-     SELECT ?, ?, ? WHERE NOT EXISTS (
-       SELECT 1 FROM quality_debt WHERE chapter_id = ? AND issue = ? AND resolved = 0
-     )`
-  )
-  for (const issue of review.issues) {
-    if (issue.severity === 'high' || issue.severity === 'medium') {
-      const sig = `${issue.location} ${issue.problem}`
-      insertDebt.run(chapterId, sig, issue.severity, chapterId, sig)
-    }
-  }
-  db.prepare(
-    "UPDATE chapter SET review_json = ?, status = 'reviewed', updated_at = datetime('now') WHERE id = ?"
-  ).run(JSON.stringify(review), chapterId)
   return review
 }
 
@@ -103,14 +78,23 @@ export function registerChapterReviewRoutes(router: Router, db: DatabaseSync): v
           suggestion: '拆分为至少 3 个场景：起（引入）→ 承（冲突推进）→ 转合（结果与钩子），或在现有场景内补充目标冲突'
         })
         review.needsFix = true
-        db.prepare('INSERT INTO quality_debt (chapter_id, issue, severity) VALUES (?, ?, ?)').run(
-          chapterId,
-          `全章结构 场景数不足（${sceneCount}）`,
-          'high'
-        )
-        db.prepare(
-          "UPDATE chapter SET review_json = ?, status = 'reviewed', updated_at = datetime('now') WHERE id = ?"
-        ).run(JSON.stringify(review), chapterId)
+      }
+      // 模型等待期间正文/任务单可能已被人工修改；审核与质量债必须原子归属原稿。
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const committed = db.prepare(
+          "UPDATE chapter SET review_json=?, status='reviewed', updated_at=datetime('now') WHERE id=? AND novel_id=? AND content=? AND goal_json=? AND status!='generating'"
+        ).run(JSON.stringify(review), chapterId, novelId, chapter.content, chapter.goal_json)
+        if (!committed.changes) throw new ChapterSaveConflict('CHAPTER_CONTENT_CONFLICT')
+        for (const issue of deduplicateRepairIssues(review.issues)) {
+          if (issue.severity === 'high' || issue.severity === 'medium') {
+            recordRepairDebt(db, chapterId, `${issue.location ?? ''} ${issue.problem}`.trim(), issue.severity)
+          }
+        }
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
       }
       res.json({ review })
     } catch (err) {
@@ -125,7 +109,7 @@ export function registerChapterReviewRoutes(router: Router, db: DatabaseSync): v
       const chapterId = Number(req.params.chapterId)
       const r = await fixChapterOnce(db, novelId, chapterId)
       if (r.reason && !r.candidateVersionId) {
-        res.status(400).json({ error: r.reason })
+        res.status(400).json({ error: r.message ?? r.reason })
         return
       }
       res.json({
