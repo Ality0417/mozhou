@@ -1,0 +1,71 @@
+name: Release Readiness
+
+# P26 项1：合入门禁技术强制（versioning.md §3.1）
+# src/** 变更时必须已 bump 版本 + 已写 CHANGELOG；否则 fail——"合入未发版"从自觉变编译错误。
+# 纯文档/配置变更（docs/site/.github/scripts/根配置）不触发。
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect source changes
+        id: src
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+          echo "base=$BASE head=$HEAD"
+          if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE=$(git hash-object -t tree -w /dev/null)
+          fi
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          if echo "$CHANGED" | grep -qE "^(client/src|server/src|electron|shared)/"; then
+            echo "src_changed=true"
+            echo "src_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "src_changed=false"
+            echo "src_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify docs consistency
+        # v0.23.1（批次 C7）：verify-docs 九项检查进 CI（此前只在本地 release.mjs [3/7] 执行）
+        run: node scripts/verify-docs.mjs
+
+      - name: Verify version bumped + CHANGELOG updated
+        if: steps.src.outputs.src_changed == 'true'
+        run: |
+          node -e "
+            const { execSync } = require('node:child_process');
+            const fs = require('node:fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const version = pkg.version;
+            let lastTag = '';
+            try { lastTag = execSync('git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git describe --tags --abbrev=0').toString().trim(); } catch { lastTag = ''; }
+            console.log('current version:', version, '| last tag:', lastTag || '(none)');
+            const lastVersion = lastTag.replace(/^v/, '');
+            if (lastVersion && version === lastVersion) {
+              console.error('FAIL: src changed but package.json version not bumped (' + version + ' == ' + lastVersion + '). Rule: versioning.md 3.1');
+              process.exit(1);
+            }
+            const rn = fs.readFileSync('docs/CHANGELOG.md', 'utf8');
+            if (!rn.includes('## v' + version)) {
+              console.error('FAIL: docs/CHANGELOG.md missing ## v' + version + ' section');
+              process.exit(1);
+            }
+            console.log('OK: version bumped and CHANGELOG updated');
+          "

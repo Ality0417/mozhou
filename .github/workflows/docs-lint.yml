@@ -1,0 +1,28 @@
+name: Docs Lint
+
+# v0.24.3（文档治理）：markdown 健康检查（乱码拦截 + 相对断链拦截）
+# 触发：PR 与所有 main push，保证指定 SHA 的必需门禁不会因 paths 过滤缺席
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Docs health check
+        run: node scripts/check-docs.mjs

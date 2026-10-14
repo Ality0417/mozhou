@@ -1,0 +1,231 @@
+const { app, BrowserWindow, dialog, utilityProcess } = require('electron')
+const { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, copyFileSync } = require('node:fs')
+const { DatabaseSync } = require('node:sqlite')
+const { join } = require('node:path')
+const { spawn } = require('node:child_process')
+const root = join(__dirname, '../..')
+const output = join(root, 'release')
+mkdirSync(output, { recursive: true })
+const data = mkdtempSync(join(output, 'release-e2e-'))
+app.setPath('userData', data)
+app.setPath('sessionData', data)
+delete process.env.PORTABLE_EXECUTABLE_DIR
+delete process.env.ELECTRON_RENDERER_URL
+delete process.env.AI_NOVEL_ALLOW_PLAINTEXT
+BrowserWindow.prototype.show = function () {}
+const { classifyServerError } = require('./diagnostics.cjs')
+const { captureWithRetry, waitForRenderer } = require('./capture.cjs')
+const { writeRunResult } = require('./result.cjs')
+const diagnostics = []
+let failNextRestoreStart = false
+let pausedJobId = null
+let pausedObservation = null
+const originalFork = utilityProcess.fork.bind(utilityProcess)
+utilityProcess.fork = (entry, args, options) => {
+  const paused = options?.env?.AI_NOVEL_RESTORE_PAUSED === '1'
+  if (paused && failNextRestoreStart) {
+    failNextRestoreStart = false
+    entry = join(data, 'injected-startup-failure.cjs')
+    writeFileSync(entry, 'process.exit(1)\n', 'utf8')
+  }
+  const worker = originalFork(entry, args, { ...options, stdio: 'pipe' })
+  if (paused && pausedJobId !== null) {
+    worker.on('message', message => {
+      if (message?.type !== 'ready') return
+      try {
+        const db = new DatabaseSync(join(data, 'ai-novel-studio.db'), { readOnly: true, timeout: 5000 })
+        try {
+          pausedObservation = {
+            status: db.prepare('SELECT status FROM job WHERE id = ?').get(pausedJobId)?.status,
+            usage: db.prepare('SELECT count(*) AS n FROM usage_log').get()?.n
+          }
+        } finally { db.close() }
+      } catch (error) { pausedObservation = { error: String(error) } }
+    })
+  }
+  worker.stdout?.on('data', () => {})
+  let buffered = ''
+  worker.stderr?.on('data', chunk => {
+    buffered += chunk.toString()
+    const lines = buffered.split('\n')
+    buffered = lines.pop().slice(-8192)
+    for (const line of lines) {
+      const kind = classifyServerError(line)
+      if (kind) {
+        diagnostics.push({ kind, at: new Date().toISOString() })
+        console.log('[isolated-diagnostic]', kind)
+      }
+    }
+  })
+  return worker
+}
+let rendererReady = false
+let captureAttempts = 0
+let started = false
+let child
+let finished = false
+const timer = setTimeout(() => finish(1, 'test timeout'), 40 * 60 * 1000)
+function finish(code, message) {
+  if (finished) return
+  finished = true
+  code = code === 0 ? 0 : 1
+  clearTimeout(timer)
+  if (child && child.exitCode === null) child.kill()
+  const result = { code, message, data, diagnostics, rendererReady, captureAttempts, version: require('../../package.json').version }
+  try {
+    writeRunResult(join(data, 'result.json'), process.env.E2E_RESULT_FILE, result)
+  } catch {
+    code = 1
+    console.error('[isolated-e2e] unable to persist complete results')
+  } finally {
+    console.log('[isolated-e2e]', message, 'code=' + code, 'data=' + data)
+    app.once('will-quit', () => app.exit(code))
+    app.quit()
+  }
+}
+app.on('browser-window-created', (_, win) => {
+  win.webContents.setBackgroundThrottling(false)
+  win.webContents.on('did-finish-load', async () => {
+    if (started) return
+    started = true
+    try {
+      let config
+      for (let i = 0; i < 80; i++) {
+        config = await win.webContents.executeJavaScript('(async () => ({base: await window.novelStudio.getServerUrl(), token: window.novelStudio.serverToken}))()')
+        if (config.base && config.token) break
+        await new Promise(r => setTimeout(r, 250))
+      }
+      if (!config?.base || !config.token) throw Error('renderer IPC bootstrap failed')
+      const base = config.base.replace(/\/$/, '')
+      const headers = { 'Content-Type': 'application/json', 'X-App-Token': config.token }
+      async function api(path, method='GET', body) {
+        const response = await fetch(base + path, {method, headers, body: body ? JSON.stringify(body) : undefined})
+        const result = await response.json()
+        if (!response.ok) throw Error(path + ': HTTP ' + response.status + ' ' + (result.error ?? ''))
+        return result
+      }
+      const health = await api('/health')
+      if (!health.ok || health.version !== require('../../package.json').version) throw Error('health/version check failed')
+      const noToken = await fetch(base + '/health', {headers: {Origin:'null'}})
+      if (noToken.status !== 403) throw Error('missing token must return 403')
+      await waitForRenderer(() => win.webContents.executeJavaScript("Boolean(document.querySelector('h1')?.textContent?.includes('欢迎使用'))"))
+      await Promise.race([
+        win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))'),
+        new Promise((_, reject) => setTimeout(() => reject(Error('renderer frame timeout')), 3000))
+      ])
+      rendererReady = true
+      const captured = await captureWithRetry(() => win.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true }))
+      captureAttempts = captured.attempts
+      writeFileSync(join(data, 'renderer.png'), captured.image.toPNG())
+      console.log('[capture] PASS attempts=' + captured.attempts)
+      if (process.env.E2E_BACKUP_ONLY === '1') {
+        async function currentNovels() {
+          const currentBase = await win.webContents.executeJavaScript('window.novelStudio.getServerUrl()')
+          if (!currentBase) throw Error('restored or rolled-back server URL missing')
+          const response = await fetch(currentBase + '/novels', { headers, signal: AbortSignal.timeout(10000) })
+          if (!response.ok) throw Error('current server unavailable: ' + response.status)
+          return (await response.json()).novels
+        }
+        const first = await api('/novels', 'POST', { inspiration: '快照前哨兵' })
+        const backup = join(data, 'snapshot-check')
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath: backup })
+        const exported = await win.webContents.executeJavaScript('window.novelStudio.exportBackup()')
+        if (!exported.ok || !existsSync(join(backup, 'backup-info.json')) || existsSync(join(backup, 'backup-in-progress.json'))) throw Error('snapshot IPC failed')
+        const second = await api('/novels', 'POST', { inspiration: '快照后哨兵' })
+        writeFileSync(join(backup, 'user.txt'), 'keep')
+        const refused = await win.webContents.executeJavaScript('window.novelStudio.exportBackup()')
+        if (refused.ok || readFileSync(join(backup, 'user.txt'), 'utf8') !== 'keep') throw Error('existing destination not protected')
+        for (const kind of ['empty', 'text', 'unrelated', 'future']) {
+          const invalid = join(data, 'invalid-' + kind)
+          mkdirSync(invalid)
+          copyFileSync(join(backup, 'backup-info.json'), join(invalid, 'backup-info.json'))
+          const file = join(invalid, 'ai-novel-studio.db')
+          if (kind === 'empty' || kind === 'text') writeFileSync(file, kind === 'empty' ? '' : 'not a database', 'utf8')
+          else {
+            if (kind === 'future') copyFileSync(join(backup, 'ai-novel-studio.db'), file)
+            const db = new DatabaseSync(file, { timeout: 5000 })
+            try {
+              if (kind === 'unrelated') db.exec('CREATE TABLE unrelated(id INTEGER PRIMARY KEY)')
+              else db.exec('INSERT INTO _migrations(version) SELECT MAX(version) + 1 FROM _migrations')
+            } finally { db.close() }
+          }
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [invalid] })
+          const rejected = await win.webContents.executeJavaScript('window.novelStudio.restoreBackup()')
+          if (rejected.ok || rejected.canceled) throw Error('invalid backup not rejected: ' + kind)
+          const preserved = await currentNovels()
+          if (![first.id, second.id].every(id => preserved.some(n => n.id === id))) throw Error('invalid backup damaged current data: ' + kind)
+          console.log('[backup-guard] rejected ' + kind + '; original data preserved')
+        }
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [backup] })
+        failNextRestoreStart = true
+        const failedStart = await win.webContents.executeJavaScript('window.novelStudio.restoreBackup()')
+        if (failedStart.ok || failNextRestoreStart) throw Error('restore startup failure was not injected/rejected')
+        const rolledBack = await currentNovels()
+        if (![first.id, second.id].every(id => rolledBack.some(n => n.id === id))) throw Error('failed startup did not restore original database')
+        console.log('[backup-rollback] failed startup; original database and service restored')
+        const backupDb = new DatabaseSync(join(backup, 'ai-novel-studio.db'), { timeout: 5000 })
+        try {
+          // 空章节范围任务即使激活也不调用模型；ready 前必须保持 queued。
+          pausedJobId = Number(backupDb.prepare("INSERT INTO job(type,status,payload_json) VALUES ('refine-range','queued',?)")
+            .run(JSON.stringify({ novelId: first.id, from: 0, to: 0 })).lastInsertRowid)
+        } finally { backupDb.close() }
+        const restored = await win.webContents.executeJavaScript('window.novelStudio.restoreBackup()')
+        if (!restored.ok) throw Error('snapshot restore failed')
+        if (!restored.previousBackup || !existsSync(join(restored.previousBackup, 'ai-novel-studio.db'))) throw Error('pre-restore database copy missing')
+        if (pausedObservation?.status !== 'queued' || pausedObservation?.usage !== 0) throw Error('paused startup executed jobs: ' + JSON.stringify(pausedObservation))
+        const novels = await currentNovels()
+        if (!novels.some(n => n.id === first.id) || novels.some(n => n.id === second.id)) throw Error('restored data mismatch')
+        finish(0, 'backup snapshot/invalid-input/startup-rollback/paused-jobs/previous-copy PASS')
+        return
+      }
+      const provider = process.env.E2E_PROVIDER ?? 'opencode-go'
+      if (!['opencode-go', 'deepseek'].includes(provider)) throw Error('unsupported test provider')
+      const imported = await api('/settings/import-opencode', 'POST', { provider })
+      console.log('[test-provider]', provider)
+      const routes = await api('/settings/model-routes')
+      for (const route of routes.routes) {
+        await api('/settings/model-routes/' + route.taskType, 'PUT', {providerId: imported.id, model:'deepseek-v4-flash', thinkingEnabled:false, maxTokens:8192})
+      }
+      console.log('[isolated-e2e] bootstrap, token guard, encrypted credential import ready')
+      if (process.env.E2E_PROBE_DIRECTIONS === '1') {
+        const novel = await api('/novels', 'POST', { inspiration: '一位古董修复师能读取器物记忆，卷入三十年前的调包疑案。' })
+        const start = Date.now()
+        const generated = await api('/novels/' + novel.id + '/directions', 'POST', {})
+        if (generated.directions?.length !== 2) throw Error('directions probe: expected two schemes')
+        console.log('[directions-probe] initial PASS elapsedMs=' + (Date.now() - start))
+        const redoStart = Date.now()
+        const redone = await api('/novels/' + novel.id + '/directions', 'POST', { directionId: generated.directions[0].id })
+        if (!redone.replaced || redone.directions?.length !== 2) throw Error('directions probe: replacement contract failed')
+        console.log('[directions-probe] redo PASS elapsedMs=' + (Date.now() - redoStart))
+        finish(0, 'directions probe PASS')
+        return
+      }
+      if (process.env.E2E_SMOKE_ONLY === '1') {
+        const novel = await api('/novels', 'POST', { inspiration: '打包态独立冒烟：雨夜守灯人' })
+        const created = await api('/novels/' + novel.id + '/chapters', 'POST', { title: '雨夜来客' })
+        const chapterId = created.id ?? created.chapterId ?? created.chapter?.id
+        if (!chapterId) throw Error('chapter creation failed')
+        const path = '/novels/' + novel.id + '/chapters/' + chapterId
+        const response = await fetch(base + path + '/generate', {
+          method: 'POST', headers, body: JSON.stringify({ guidance: '三百字以内，有完整场景。', tripleReview: false })
+        })
+        const text = await response.text()
+        if (!response.ok || !text.includes('event: done')) throw Error('packaged SSE generation failed')
+        const exported = await fetch(base + '/novels/' + novel.id + '/export?format=txt', { headers })
+        if (!exported.ok || !(await exported.text()).trim()) throw Error('packaged export failed')
+        finish(0, 'packaged IPC/auth/SSE/export PASS')
+        return
+      }
+      child = spawn(process.env.SYSTEM_NODE_EXE, [join(root,'scripts/e2e/round.mjs'),'1'], {
+        cwd:root,
+        env:{...process.env,E2E_BASE_URL:base,E2E_APP_TOKEN:config.token,E2E_PROVIDER_ID:String(imported.id),E2E_REPORT:join(data,'round-report.md')},
+        stdio:['ignore','inherit','inherit'], windowsHide:true
+      })
+      child.once('error', e => finish(1,e.message))
+      child.once('exit', code => finish(code ?? 1, code === 0 ? 'T1-T5 completed' : 'T1-T5 failed or interrupted'))
+    } catch (error) { finish(1,error.message) }
+  })
+})
+require(process.env.E2E_PACKAGED === '1'
+  ? join(root, 'release/win-unpacked/resources/app.asar/out/main/index.js')
+  : join(root, 'out/main/index.js'))

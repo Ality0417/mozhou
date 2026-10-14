@@ -1,0 +1,13 @@
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - electron-winstaller
+
+# 安全覆盖统一在此维护，禁止与 package.json.pnpm 重复配置。
+overrides:
+  adm-zip: ^0.6.0
+  "fast-uri@>=3.0.0 <3.1.6": 3.1.6
+  "qs@<6.16.0": 6.16.0
+  "js-yaml@>=4.0.0 <4.3.2": 4.3.2
+  "@xmldom/xmldom@>=0.7.0 <0.8.15": 0.8.15
+  "sharp@<0.35.4": 0.35.4
